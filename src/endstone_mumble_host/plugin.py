@@ -47,7 +47,7 @@ GLIBC_PREFIXES = (
 
 class MumbleHost(Plugin):
     prefix = "MumbleHost"
-    version = "0.2.1.dev1"
+    version = "0.2.1.dev2"
     api_version = "0.11"
     description = "One-file MCSV Mumble server host with automatic runtime install"
     authors = ["SamSoSleepy"]
@@ -68,6 +68,10 @@ class MumbleHost(Plugin):
                 safe_env[key] = value
         (self.data_folder / "env-probe.json").write_text(
             json.dumps(safe_env, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        (self.data_folder / "env-keys.txt").write_text(
+            "\n".join(sorted(os.environ.keys())) + "\n",
             encoding="utf-8",
         )
         threading.Thread(
