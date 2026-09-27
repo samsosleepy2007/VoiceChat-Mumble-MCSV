@@ -112,3 +112,9 @@ Discord : https://discord.gg/FnmWw7nWyq
 Port `18655` is an allocated port of the MCSV server used for this project. Another MCSV server must use one of its own allocated ports.
 
 This repository hosts the custom VC proximity-enabled Mumble server on MCSV. Minecraft position/range state is supplied by the VC Mumble Endstone bridge, and distance gain is consumed by the custom VC Mumla client.
+
+
+## Companion Item Mic add-on
+
+The MumbleHost v0.3.0 release also includes `VC_Mumble_ItemMic_v2.9.0.mcaddon`.
+Item Mic v2.9.0 adds realtime DDUI Voice Range slider application and a player-private Voice Range preview ring.
