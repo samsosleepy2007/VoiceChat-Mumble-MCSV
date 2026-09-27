@@ -1,0 +1,41 @@
+name: Attach Item Mic Addon
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  attach-addon:
+    if: contains(github.event.head_commit.message, '[attach-addon]')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download tested Item Mic v2.8.0
+        run: |
+          curl -fL \
+            -o VC_Mumble_ItemMic_v2.8.0.mcaddon \
+            https://github.com/samsosleepy2007/VoiceChat-Minecraft-bedrock-Mumble/releases/download/v0.6.0-beta.11/VC_Mumble_ItemMic_v2.8.0.mcaddon
+
+          echo "2e5da0b7692383af9b836544e3324bb46cde6185c3419e0ad86de7d850aab522  VC_Mumble_ItemMic_v2.8.0.mcaddon" | sha256sum -c -
+
+      - name: Update v0.3.0 release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v0.3.0 \
+            --repo "${{ github.repository }}" \
+            --pattern "endstone_mumble_host-0.3.0-py3-none-any.whl" \
+            --dir .
+
+          sha256sum \
+            endstone_mumble_host-0.3.0-py3-none-any.whl \
+            VC_Mumble_ItemMic_v2.8.0.mcaddon \
+            > SHA256SUMS.txt
+
+          gh release upload v0.3.0 \
+            VC_Mumble_ItemMic_v2.8.0.mcaddon \
+            SHA256SUMS.txt \
+            --repo "${{ github.repository }}" \
+            --clobber
