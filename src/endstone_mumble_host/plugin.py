@@ -129,7 +129,7 @@ class MumbleHost(Plugin):
                 f"port={PORT}\n"
                 "users=20\n"
                 "database=/home/container/mumble-runtime/data/mumble-server.sqlite\n"
-                "welcometext=<b>MCSV Mumble</b><br>Hosted by VC Mumble Server\n"
+                "welcometext=<b>MCSV Mumble</b><br>Hosted by MCSV<br>Plugin Mumble connate by SamSoSleepy<br>Discord : https://discord.gg/FnmWw7nWyq\n"
                 "logfile=/home/container/mumble-runtime/data/mumble-server.log\n"
                 "pidfile=\n"
                 "bonjour=false\n",
