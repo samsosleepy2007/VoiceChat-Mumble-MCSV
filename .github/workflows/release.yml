@@ -1,0 +1,64 @@
+name: Release MumbleHost
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: contains(github.event.head_commit.message, '[release]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Resolve version
+        id: version
+        run: |
+          VERSION="$(python - <<'PY'
+          import pathlib, tomllib
+          data = tomllib.loads(pathlib.Path("pyproject.toml").read_text())
+          print(data["project"]["version"])
+          PY
+          )"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build wheel
+        run: |
+          python -m pip install --upgrade build
+          python -m build --wheel
+          sha256sum dist/*.whl | tee SHA256SUMS.txt
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          cat > RELEASE_BODY.md <<'EOF'
+          ## MumbleHost one-file install
+
+          Upload the wheel to the MCSV Endstone `/plugins` directory and restart the server.
+
+          On first start the plugin automatically:
+          - downloads pinned official Mumble Server 1.6.870 runtime,
+          - extracts and prepares compatible runtime libraries,
+          - creates the Mumble configuration,
+          - starts Mumble on the configured MCSV port,
+          - reuses the runtime on later restarts.
+
+          Tested on MCSV / Endstone 0.11.12, Linux x86_64 with public TCP connectivity.
+
+          Current project deployment uses `sv7.mcsv.me:18655`.
+          EOF
+
+          gh release create "$TAG" dist/*.whl SHA256SUMS.txt \
+            --target "$GITHUB_SHA" \
+            --title "MumbleHost $TAG" \
+            --notes-file RELEASE_BODY.md
