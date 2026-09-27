@@ -58,7 +58,12 @@ jobs:
           Current project deployment uses `sv7.mcsv.me:18655`.
           EOF
 
+          EXTRA_ARGS=()
+          if [[ "$TAG" == *"-probe"* ]]; then
+            EXTRA_ARGS+=(--prerelease)
+          fi
           gh release create "$TAG" dist/*.whl SHA256SUMS.txt \
             --target "$GITHUB_SHA" \
             --title "MumbleHost $TAG" \
-            --notes-file RELEASE_BODY.md
+            --notes-file RELEASE_BODY.md \
+            "${EXTRA_ARGS[@]}"
