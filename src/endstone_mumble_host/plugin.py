@@ -49,7 +49,7 @@ GLIBC_PREFIXES = (
 
 class MumbleHost(Plugin):
     prefix = "MumbleHost"
-    version = "0.2.1.dev7"
+    version = "0.2.1.dev8"
     api_version = "0.11"
     description = "One-file MCSV Mumble host with automatic IP/port detection"
     authors = ["SamSoSleepy"]
@@ -65,10 +65,39 @@ class MumbleHost(Plugin):
         self.data_folder.mkdir(parents=True, exist_ok=True)
         self._stop_event.clear()
         threading.Thread(
+            target=self._probe_mcsv_api,
+            name="McsvApiProbe",
+            daemon=True,
+        ).start()
+        threading.Thread(
             target=self._bootstrap_and_start,
             name="MumbleHostStart",
             daemon=True,
         ).start()
+
+    def _probe_mcsv_api(self) -> None:
+        url = "https://api.mcsv.me/api/v1/server"
+        try:
+            request = urllib.request.Request(
+                url,
+                headers={
+                    "User-Agent": "MumbleHost/0.2.1.dev8",
+                    "X-MCSV-Server-UUID": os.environ.get("P_SERVER_UUID", ""),
+                },
+            )
+            with urllib.request.urlopen(request, timeout=8) as response:
+                body = response.read(8000).decode("utf-8", errors="replace")
+                result = f"status={response.status}\n{body}\n"
+        except urllib.error.HTTPError as exc:
+            body = exc.read(8000).decode("utf-8", errors="replace")
+            result = f"status={exc.code}\n{body}\n"
+        except Exception as exc:
+            result = f"error={type(exc).__name__}: {exc}\n"
+
+        (self.data_folder / "mcsv-api-probe.txt").write_text(
+            result,
+            encoding="utf-8",
+        )
 
     def on_disable(self) -> None:
         self._stop_event.set()
