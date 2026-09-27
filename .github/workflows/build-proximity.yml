@@ -1,9 +1,10 @@
 name: Build VC Proximity Mumble Linux
+# v0.3 proximity artifact
 
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, feature/mcsv-proximity-v0.3]
 
 jobs:
   build:
@@ -63,15 +64,22 @@ jobs:
           strings .build/mumble-build/mumble-server | grep -F VC-PROX-FEED
           strings .build/mumble-build/mumble-server | grep -F VCG1 || true
 
-      - name: Stage artifact
+      - name: Build proximity plugin wheel
         run: |
-          mkdir -p out
+          mkdir -p src/endstone_mumble_host/bin out
+          cp .build/mumble-build/mumble-server src/endstone_mumble_host/bin/mumble-server-vc
+          chmod +x src/endstone_mumble_host/bin/mumble-server-vc
+          python3 -m pip install --upgrade build
+          rm -rf dist build *.egg-info
+          python3 -m build --wheel
           cp .build/mumble-build/mumble-server out/mumble-server-vc
+          cp dist/*.whl out/
           chmod +x out/mumble-server-vc
-          sha256sum out/mumble-server-vc > out/SHA256SUMS.txt
+          sha256sum out/mumble-server-vc out/*.whl > out/SHA256SUMS.txt
+          unzip -l dist/*.whl | grep -F 'endstone_mumble_host/bin/mumble-server-vc'
 
       - uses: actions/upload-artifact@v4
         with:
-          name: mumble-server-vc-linux-x86_64
+          name: mumble-host-v0.3-proximity
           path: out/
           retention-days: 14

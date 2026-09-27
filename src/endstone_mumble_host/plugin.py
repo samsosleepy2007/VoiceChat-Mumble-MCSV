@@ -10,14 +10,19 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+from importlib import resources
 
 from endstone.plugin import Plugin
+
+from .bridge_relay import BridgeRelay
 
 
 PORT = 18655
 RUNTIME = pathlib.Path("/home/container/mumble-runtime")
 ROOTFS = RUNTIME / "rootfs"
 LAYERS = RUNTIME / "layers"
+CUSTOM_DIR = RUNTIME / "custom"
+CUSTOM_BINARY = CUSTOM_DIR / "mumble-server-vc"
 
 MUMBLE_REPOSITORY = "mumblevoip/mumble-server"
 MUMBLE_TAG = "v1.6.870-acme"
@@ -47,15 +52,16 @@ GLIBC_PREFIXES = (
 
 class MumbleHost(Plugin):
     prefix = "MumbleHost"
-    version = "0.2.0"
+    version = "0.3.0.dev1"
     api_version = "0.11"
-    description = "One-file MCSV Mumble server host with automatic runtime install"
+    description = "MCSV Mumble server with Minecraft proximity routing"
     authors = ["SamSoSleepy"]
 
     def __init__(self):
         super().__init__()
         self._proc: subprocess.Popen | None = None
         self._stdout = None
+        self._bridge_relay: BridgeRelay | None = None
 
     def on_enable(self) -> None:
         self.data_folder.mkdir(parents=True, exist_ok=True)
@@ -66,6 +72,11 @@ class MumbleHost(Plugin):
         ).start()
 
     def on_disable(self) -> None:
+        relay = self._bridge_relay
+        if relay is not None:
+            relay.stop()
+        self._bridge_relay = None
+
         process = self._proc
         if process is not None and process.poll() is None:
             try:
@@ -251,13 +262,38 @@ class MumbleHost(Plugin):
         add_directory(source / "libproxy")
         return output
 
+    def _install_custom_binary(self) -> pathlib.Path:
+        package_binary = resources.files("endstone_mumble_host").joinpath(
+            "bin/mumble-server-vc"
+        )
+        if not package_binary.is_file():
+            raise RuntimeError(
+                "VC proximity Mumble binary is missing from this wheel"
+            )
+
+        CUSTOM_DIR.mkdir(parents=True, exist_ok=True)
+        temporary = CUSTOM_BINARY.with_suffix(".tmp")
+        with resources.as_file(package_binary) as source:
+            shutil.copyfile(source, temporary)
+        temporary.chmod(0o755)
+        temporary.replace(CUSTOM_BINARY)
+        return CUSTOM_BINARY
+
     def _bootstrap_and_start(self) -> None:
         try:
-            binary = ROOTFS / "usr/bin/mumble-server"
-            if not binary.exists():
+            stock_binary = ROOTFS / "usr/bin/mumble-server"
+            if not stock_binary.exists():
                 self._install_runtime()
 
-            self._start_mumble()
+            binary = self._install_custom_binary()
+            self._start_mumble(binary)
+
+            self._bridge_relay = BridgeRelay(self.data_folder, self.logger)
+            self._bridge_relay.start()
+            self.logger.info(
+                "Minecraft proximity relay started; "
+                "waiting for Endstone bridge snapshot"
+            )
         except Exception as exc:
             self._status(
                 f"stage=error error={type(exc).__name__}: {exc}"
@@ -266,13 +302,12 @@ class MumbleHost(Plugin):
                 f"Mumble host failed: {type(exc).__name__}: {exc}"
             )
 
-    def _start_mumble(self) -> None:
+    def _start_mumble(self, binary: pathlib.Path) -> None:
         runtime = RUNTIME
         root = ROOTFS
-        binary = root / "usr/bin/mumble-server"
 
         if not binary.exists():
-            raise RuntimeError("mumble-server runtime is unavailable")
+            raise RuntimeError("VC proximity Mumble binary is unavailable")
 
         data = runtime / "data"
         data.mkdir(parents=True, exist_ok=True)
@@ -336,8 +371,8 @@ class MumbleHost(Plugin):
             )
 
         self._status(
-            f"stage=running pid={self._proc.pid} port={PORT}"
+            f"stage=running pid={self._proc.pid} port={PORT} proximity=enabled"
         )
         self.logger.info(
-            f"Mumble server running on 0.0.0.0:{PORT}"
+            f"VC proximity Mumble server running on 0.0.0.0:{PORT}"
         )
