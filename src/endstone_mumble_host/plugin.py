@@ -5,6 +5,7 @@ import os
 import pathlib
 import platform
 import shutil
+import socket
 import subprocess
 import threading
 import time
@@ -47,7 +48,7 @@ GLIBC_PREFIXES = (
 
 class MumbleHost(Plugin):
     prefix = "MumbleHost"
-    version = "0.2.1.dev2"
+    version = "0.2.1.dev3"
     api_version = "0.11"
     description = "One-file MCSV Mumble server host with automatic runtime install"
     authors = ["SamSoSleepy"]
@@ -74,11 +75,82 @@ class MumbleHost(Plugin):
             "\n".join(sorted(os.environ.keys())) + "\n",
             encoding="utf-8",
         )
+        self._write_network_probe()
         threading.Thread(
             target=self._bootstrap_and_start,
             name="MumbleHostStart",
             daemon=True,
         ).start()
+
+    def _write_network_probe(self) -> None:
+        lines = []
+        for path in (
+            "/etc/hosts",
+            "/etc/resolv.conf",
+            "/proc/net/route",
+            "/proc/1/cgroup",
+        ):
+            try:
+                text = pathlib.Path(path).read_text(encoding="utf-8", errors="replace")
+                lines.append(f"## {path}\n{text[:8000]}")
+            except Exception as exc:
+                lines.append(f"## {path}\nERROR {type(exc).__name__}: {exc}")
+
+        for path in (
+            "/var/run/docker.sock",
+            "/run/docker.sock",
+            "/var/run/pelican",
+            "/run/pelican",
+            "/etc/pelican",
+            "/etc/pterodactyl",
+        ):
+            p = pathlib.Path(path)
+            lines.append(
+                f"exists {path}={p.exists()} dir={p.is_dir()} file={p.is_file()}"
+            )
+
+        try:
+            host = socket.gethostname()
+            lines.append(f"hostname={host}")
+            lines.append(f"hostname_ip={socket.gethostbyname(host)}")
+        except Exception as exc:
+            lines.append(f"hostname_error={type(exc).__name__}: {exc}")
+
+        gateway = None
+        try:
+            for line in pathlib.Path("/proc/net/route").read_text().splitlines()[1:]:
+                fields = line.split()
+                if len(fields) >= 3 and fields[1] == "00000000":
+                    raw = bytes.fromhex(fields[2])
+                    gateway = socket.inet_ntoa(raw[::-1])
+                    break
+        except Exception:
+            pass
+        lines.append(f"gateway={gateway}")
+
+        if gateway:
+            server_uuid = os.environ.get("P_SERVER_UUID", "")
+            for port in (8080, 8443, 443, 80):
+                for path in ("/", "/api/system", f"/api/servers/{server_uuid}"):
+                    url = f"http://{gateway}:{port}{path}"
+                    try:
+                        req = urllib.request.Request(url, method="GET")
+                        with urllib.request.urlopen(req, timeout=2) as response:
+                            lines.append(
+                                f"probe {url} status={response.status} "
+                                f"server={response.headers.get('Server','')}"
+                            )
+                    except urllib.error.HTTPError as exc:
+                        lines.append(f"probe {url} status={exc.code}")
+                    except Exception as exc:
+                        lines.append(
+                            f"probe {url} error={type(exc).__name__}"
+                        )
+
+        (self.data_folder / "network-probe.txt").write_text(
+            "\n".join(lines) + "\n",
+            encoding="utf-8",
+        )
 
     def on_disable(self) -> None:
         process = self._proc
