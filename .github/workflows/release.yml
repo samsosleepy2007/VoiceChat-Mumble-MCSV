@@ -59,7 +59,7 @@ jobs:
           EOF
 
           EXTRA_ARGS=()
-          if [[ "$TAG" == *"-probe"* ]]; then
+          if [[ "$TAG" == *".dev"* ]]; then
             EXTRA_ARGS+=(--prerelease)
           fi
           gh release create "$TAG" dist/*.whl SHA256SUMS.txt \

@@ -47,7 +47,7 @@ GLIBC_PREFIXES = (
 
 class MumbleHost(Plugin):
     prefix = "MumbleHost"
-    version = "0.2.1-probe"
+    version = "0.2.1.dev1"
     api_version = "0.11"
     description = "One-file MCSV Mumble server host with automatic runtime install"
     authors = ["SamSoSleepy"]
