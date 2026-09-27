@@ -1,4 +1,5 @@
 name: Build VC Proximity Mumble Linux
+# v0.3 proximity artifact
 
 on:
   workflow_dispatch:
