@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "endstone-mumble-host"
-version = "0.2.0"
-description = "One-file MCSV Mumble Server host with automatic runtime installation"
+version = "0.3.0.dev1"
+description = "MCSV Mumble Server with Minecraft proximity routing"
 requires-python = ">=3.11"
 dependencies = ["endstone>=0.11.0"]
 
@@ -17,3 +17,6 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+endstone_mumble_host = ["bin/mumble-server-vc"]
