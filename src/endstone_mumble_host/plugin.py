@@ -49,7 +49,7 @@ GLIBC_PREFIXES = (
 
 class MumbleHost(Plugin):
     prefix = "MumbleHost"
-    version = "0.2.1.dev6"
+    version = "0.2.1.dev7"
     api_version = "0.11"
     description = "One-file MCSV Mumble host with automatic IP/port detection"
     authors = ["SamSoSleepy"]
@@ -340,7 +340,7 @@ class MumbleHost(Plugin):
             ]
             mapped = []
             for port in candidates:
-                result = self._hairpin_mapping_test(port)
+                result = self._hairpin_mapping_test(port, public_ip)
                 mapped.append((port, result))
             (self.data_folder / "allocation-probe.txt").write_text(
                 "\n".join(
@@ -451,7 +451,7 @@ class MumbleHost(Plugin):
                 return socket.inet_ntoa(raw[::-1])
         raise RuntimeError("Docker gateway not found")
 
-    def _hairpin_mapping_test(self, port: int) -> str:
+    def _hairpin_mapping_test(self, port: int, public_ip: str) -> str:
         listener = None
         outbound = None
         accepted = None
@@ -462,11 +462,10 @@ class MumbleHost(Plugin):
             listener.listen(2)
             listener.settimeout(0.8)
 
-            gateway = self._docker_gateway()
             outbound = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            outbound.settimeout(0.8)
+            outbound.settimeout(1.2)
             try:
-                outbound.connect((gateway, port))
+                outbound.connect((public_ip, port))
             except Exception:
                 return "not-mapped"
 
