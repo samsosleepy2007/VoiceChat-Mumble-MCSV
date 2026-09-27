@@ -132,13 +132,13 @@ The current tested configuration is generated automatically with:
 - Bonjour: disabled
 - SQLite database stored under `/home/container/mumble-runtime/data`
 
-The welcome text intentionally contains:
+The welcome text is:
 
 ```text
-Hosted by VC Mumble Server
+Hosted by MCSV
+Plugin Mumble connate by SamSoSleepy
+Discord : https://discord.gg/FnmWw7nWyq
 ```
-
-because the custom VC Mumla client uses that marker to learn the configured server name after connecting.
 
 ## Important
 
