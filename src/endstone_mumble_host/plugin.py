@@ -49,7 +49,7 @@ GLIBC_PREFIXES = (
 
 class MumbleHost(Plugin):
     prefix = "MumbleHost"
-    version = "0.2.1.dev8"
+    version = "0.2.1.dev9"
     api_version = "0.11"
     description = "One-file MCSV Mumble host with automatic IP/port detection"
     authors = ["SamSoSleepy"]
@@ -81,7 +81,7 @@ class MumbleHost(Plugin):
             request = urllib.request.Request(
                 url,
                 headers={
-                    "User-Agent": "MumbleHost/0.2.1.dev8",
+                    "User-Agent": "MumbleHost/0.2.1.dev9",
                     "X-MCSV-Server-UUID": os.environ.get("P_SERVER_UUID", ""),
                 },
             )
@@ -358,40 +358,8 @@ class MumbleHost(Plugin):
 
             self._start_mumble()
 
-            candidates = [
-                primary_port,
-                18655,
-                18656,
-                27220,
-                34429,
-                45504,
-                17180,
-            ]
-            mapped = []
-            for port in candidates:
-                result = self._hairpin_mapping_test(port, public_ip)
-                mapped.append((port, result))
-            (self.data_folder / "allocation-probe.txt").write_text(
-                "\n".join(
-                    f"{port}={result}" for port, result in mapped
-                ) + "\n",
-                encoding="utf-8",
-            )
-
-            selected = next(
-                (
-                    port
-                    for port, result in mapped
-                    if result == "mapped" and port != primary_port
-                ),
-                None,
-            )
-            if selected is None:
-                raise RuntimeError(
-                    "allocation hairpin probe found no secondary TCP port"
-                )
-
-            self._start_tcp_proxy(public_ip, selected)
+            pool_port = self._network_pool_first_port()
+            self._start_tcp_proxy(public_ip, pool_port)
         except Exception as exc:
             self._status(
                 f"stage=error error={type(exc).__name__}: {exc}"
@@ -512,6 +480,18 @@ class MumbleHost(Plugin):
                         sock.close()
                     except Exception:
                         pass
+
+    def _network_pool_first_port(self) -> int:
+        payload = json.loads(NETWORK_FILE.read_text(encoding="utf-8"))
+        mapping = str(payload.get("mapping", "")).strip()
+        parts = mapping.split(":")
+        if len(parts) < 2:
+            raise RuntimeError(f"invalid MCSV network mapping: {mapping!r}")
+        first = parts[1].split("-", 1)[0].strip()
+        port = int(first)
+        if not (1 <= port <= 65535):
+            raise RuntimeError(f"invalid MCSV network pool port: {port}")
+        return port
 
     def _start_tcp_proxy(self, public_ip: str, public_port: int) -> None:
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
