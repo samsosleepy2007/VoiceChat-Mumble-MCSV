@@ -1,0 +1,77 @@
+name: Build VC Proximity Mumble Linux
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[prox-build]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            build-essential cmake ninja-build pkg-config git python3 ca-certificates \
+            qt6-base-dev qt6-tools-dev qt6-tools-dev-tools qt6-qpa-plugins \
+            libssl-dev libboost-dev libprotobuf-dev protobuf-compiler libprotoc-dev \
+            libcap-dev libxi-dev libavahi-compat-libdnssd-dev libzeroc-ice-dev \
+            libsqlite3-dev libmysqlclient-dev libpq-dev
+
+      - name: Fetch Mumble 1.6.870
+        run: |
+          git clone --filter=tree:0 https://github.com/mumble-voip/mumble.git .build/mumble
+          git -C .build/mumble checkout v1.6.870
+          git -C .build/mumble submodule update --init --depth 1
+
+      - name: Apply VC proximity patches
+        run: |
+          python3 tools/patch_mumble_linux.py \
+            --source .build/mumble \
+            --patch-dir mumble-patch
+
+      - name: Configure server-only build
+        run: |
+          cmake -S .build/mumble -B .build/mumble-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_NUMBER=870 \
+            -Dclient=OFF \
+            -Dserver=ON \
+            -Dice=OFF \
+            -Dtests=OFF \
+            -Dzeroconf=OFF \
+            -Denable-mysql=OFF \
+            -Denable-postgresql=OFF \
+            -Dwarnings-as-errors=OFF \
+            -Dtranslations=OFF \
+            -Dplugins=OFF \
+            -Doverlay=OFF \
+            -Ddbus=OFF
+
+      - name: Build custom server
+        run: |
+          cmake --build .build/mumble-build --target mumble-server -j 2
+          test -x .build/mumble-build/mumble-server
+          file .build/mumble-build/mumble-server
+          ldd .build/mumble-build/mumble-server
+          strings .build/mumble-build/mumble-server | grep -F VC-PROX-FEED
+          strings .build/mumble-build/mumble-server | grep -F VCG1 || true
+
+      - name: Stage artifact
+        run: |
+          mkdir -p out
+          cp .build/mumble-build/mumble-server out/mumble-server-vc
+          chmod +x out/mumble-server-vc
+          sha256sum out/mumble-server-vc > out/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mumble-server-vc-linux-x86_64
+          path: out/
+          retention-days: 14
