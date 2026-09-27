@@ -49,7 +49,7 @@ GLIBC_PREFIXES = (
 
 class MumbleHost(Plugin):
     prefix = "MumbleHost"
-    version = "0.2.1.dev5"
+    version = "0.2.1.dev6"
     api_version = "0.11"
     description = "One-file MCSV Mumble host with automatic IP/port detection"
     authors = ["SamSoSleepy"]
@@ -125,11 +125,6 @@ class MumbleHost(Plugin):
                 "could not detect MCSV public IP from network metadata"
             )
 
-        address = f"{public_ip}:{public_port}"
-        (self.data_folder / "connection.txt").write_text(
-            address + "\n",
-            encoding="utf-8",
-        )
         return public_ip, public_port
 
     def _public_ip_from_mcsv_files(self) -> str | None:
@@ -326,14 +321,48 @@ class MumbleHost(Plugin):
 
     def _bootstrap_and_start(self) -> None:
         try:
-            public_ip, public_port = self._discover_endpoint()
+            public_ip, primary_port = self._discover_endpoint()
 
             binary = ROOTFS / "usr/bin/mumble-server"
             if not binary.exists():
                 self._install_runtime()
 
             self._start_mumble()
-            self._start_tcp_proxy(public_ip, public_port)
+
+            candidates = [
+                primary_port,
+                18655,
+                18656,
+                27220,
+                34429,
+                45504,
+                17180,
+            ]
+            mapped = []
+            for port in candidates:
+                result = self._hairpin_mapping_test(port)
+                mapped.append((port, result))
+            (self.data_folder / "allocation-probe.txt").write_text(
+                "\n".join(
+                    f"{port}={result}" for port, result in mapped
+                ) + "\n",
+                encoding="utf-8",
+            )
+
+            selected = next(
+                (
+                    port
+                    for port, result in mapped
+                    if result == "mapped" and port != primary_port
+                ),
+                None,
+            )
+            if selected is None:
+                raise RuntimeError(
+                    "allocation hairpin probe found no secondary TCP port"
+                )
+
+            self._start_tcp_proxy(public_ip, selected)
         except Exception as exc:
             self._status(
                 f"stage=error error={type(exc).__name__}: {exc}"
@@ -410,6 +439,52 @@ class MumbleHost(Plugin):
                 f"mumble exited rc={return_code}: {tail}"
             )
 
+    def _docker_gateway(self) -> str:
+        route = pathlib.Path("/proc/net/route").read_text(
+            encoding="utf-8",
+            errors="replace",
+        )
+        for line in route.splitlines()[1:]:
+            fields = line.split()
+            if len(fields) >= 3 and fields[1] == "00000000":
+                raw = bytes.fromhex(fields[2])
+                return socket.inet_ntoa(raw[::-1])
+        raise RuntimeError("Docker gateway not found")
+
+    def _hairpin_mapping_test(self, port: int) -> str:
+        listener = None
+        outbound = None
+        accepted = None
+        try:
+            listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            listener.bind(("0.0.0.0", port))
+            listener.listen(2)
+            listener.settimeout(0.8)
+
+            gateway = self._docker_gateway()
+            outbound = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            outbound.settimeout(0.8)
+            try:
+                outbound.connect((gateway, port))
+            except Exception:
+                return "not-mapped"
+
+            try:
+                accepted, _ = listener.accept()
+                return "mapped"
+            except Exception:
+                return "not-mapped"
+        except OSError as exc:
+            return f"bind-error:{exc.errno}"
+        finally:
+            for sock in (accepted, outbound, listener):
+                if sock is not None:
+                    try:
+                        sock.close()
+                    except Exception:
+                        pass
+
     def _start_tcp_proxy(self, public_ip: str, public_port: int) -> None:
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -419,6 +494,10 @@ class MumbleHost(Plugin):
         self._proxy_socket = listener
 
         address = f"{public_ip}:{public_port}"
+        (self.data_folder / "connection.txt").write_text(
+            address + "\n",
+            encoding="utf-8",
+        )
         self._status(
             f"stage=running pid={self._proc.pid} public={address} "
             f"tcp_proxy=0.0.0.0:{public_port} "
