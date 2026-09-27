@@ -12,13 +12,15 @@ jobs:
     if: contains(github.event.head_commit.message, '[attach-addon]')
     runs-on: ubuntu-latest
     steps:
-      - name: Download tested Item Mic v2.8.0
+      - name: Download and verify Item Mic v2.9.0
         run: |
-          curl -fL \
-            -o VC_Mumble_ItemMic_v2.8.0.mcaddon \
-            https://github.com/samsosleepy2007/VoiceChat-Minecraft-bedrock-Mumble/releases/download/v0.6.0-beta.11/VC_Mumble_ItemMic_v2.8.0.mcaddon
+          BASE="https://github.com/samsosleepy2007/VoiceChat-Minecraft-bedrock-Mumble/releases/download/v0.6.0-beta.12"
+          curl -fL -o VC_Mumble_ItemMic_v2.9.0.mcaddon "$BASE/VC_Mumble_ItemMic_v2.9.0.mcaddon"
+          curl -fL -o upstream-SHA256SUMS.txt "$BASE/SHA256SUMS.txt"
 
-          echo "2e5da0b7692383af9b836544e3324bb46cde6185c3419e0ad86de7d850aab522  VC_Mumble_ItemMic_v2.8.0.mcaddon" | sha256sum -c -
+          grep '  VC_Mumble_ItemMic_v2.9.0.mcaddon$' upstream-SHA256SUMS.txt > addon-SHA256.txt
+          test -s addon-SHA256.txt
+          sha256sum -c addon-SHA256.txt
 
       - name: Update v0.3.0 release assets
         env:
@@ -29,13 +31,16 @@ jobs:
             --pattern "endstone_mumble_host-0.3.0-py3-none-any.whl" \
             --dir .
 
+          gh release delete-asset v0.3.0 VC_Mumble_ItemMic_v2.8.0.mcaddon \
+            --repo "${{ github.repository }}" -y || true
+
           sha256sum \
             endstone_mumble_host-0.3.0-py3-none-any.whl \
-            VC_Mumble_ItemMic_v2.8.0.mcaddon \
+            VC_Mumble_ItemMic_v2.9.0.mcaddon \
             > SHA256SUMS.txt
 
           gh release upload v0.3.0 \
-            VC_Mumble_ItemMic_v2.8.0.mcaddon \
+            VC_Mumble_ItemMic_v2.9.0.mcaddon \
             SHA256SUMS.txt \
             --repo "${{ github.repository }}" \
             --clobber
