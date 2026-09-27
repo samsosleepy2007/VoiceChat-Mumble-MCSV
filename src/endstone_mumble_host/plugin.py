@@ -4,9 +4,7 @@ import json
 import os
 import pathlib
 import platform
-import select
 import shutil
-import socket
 import subprocess
 import threading
 import time
@@ -16,12 +14,10 @@ import urllib.request
 from endstone.plugin import Plugin
 
 
+PORT = 18655
 RUNTIME = pathlib.Path("/home/container/mumble-runtime")
 ROOTFS = RUNTIME / "rootfs"
 LAYERS = RUNTIME / "layers"
-NETWORK_FILE = pathlib.Path("/home/container/.mcsv-bedrock-network.json")
-SERVER_PROPERTIES = pathlib.Path("/home/container/server.properties")
-INTERNAL_MUMBLE_PORT = 64738
 
 MUMBLE_REPOSITORY = "mumblevoip/mumble-server"
 MUMBLE_TAG = "v1.6.870-acme"
@@ -31,6 +27,8 @@ MUMBLE_PLATFORM_MANIFEST = (
 DOCKER_AUTH_URL = "https://auth.docker.io/token"
 DOCKER_REGISTRY = "https://registry-1.docker.io"
 
+# Keep the MCSV host glibc. Only non-glibc runtime libraries are linked from
+# the extracted official Mumble image.
 GLIBC_PREFIXES = (
     "libc.so",
     "libpthread.so",
@@ -49,66 +47,25 @@ GLIBC_PREFIXES = (
 
 class MumbleHost(Plugin):
     prefix = "MumbleHost"
-    version = "0.2.1.dev9"
+    version = "0.2.0"
     api_version = "0.11"
-    description = "One-file MCSV Mumble host with automatic IP/port detection"
+    description = "One-file MCSV Mumble server host with automatic runtime install"
     authors = ["SamSoSleepy"]
 
     def __init__(self):
         super().__init__()
         self._proc: subprocess.Popen | None = None
         self._stdout = None
-        self._proxy_socket: socket.socket | None = None
-        self._stop_event = threading.Event()
 
     def on_enable(self) -> None:
         self.data_folder.mkdir(parents=True, exist_ok=True)
-        self._stop_event.clear()
-        threading.Thread(
-            target=self._probe_mcsv_api,
-            name="McsvApiProbe",
-            daemon=True,
-        ).start()
         threading.Thread(
             target=self._bootstrap_and_start,
             name="MumbleHostStart",
             daemon=True,
         ).start()
 
-    def _probe_mcsv_api(self) -> None:
-        url = "https://api.mcsv.me/api/v1/server"
-        try:
-            request = urllib.request.Request(
-                url,
-                headers={
-                    "User-Agent": "MumbleHost/0.2.1.dev9",
-                    "X-MCSV-Server-UUID": os.environ.get("P_SERVER_UUID", ""),
-                },
-            )
-            with urllib.request.urlopen(request, timeout=8) as response:
-                body = response.read(8000).decode("utf-8", errors="replace")
-                result = f"status={response.status}\n{body}\n"
-        except urllib.error.HTTPError as exc:
-            body = exc.read(8000).decode("utf-8", errors="replace")
-            result = f"status={exc.code}\n{body}\n"
-        except Exception as exc:
-            result = f"error={type(exc).__name__}: {exc}\n"
-
-        (self.data_folder / "mcsv-api-probe.txt").write_text(
-            result,
-            encoding="utf-8",
-        )
-
     def on_disable(self) -> None:
-        self._stop_event.set()
-
-        if self._proxy_socket is not None:
-            try:
-                self._proxy_socket.close()
-            except Exception:
-                pass
-            self._proxy_socket = None
-
         process = self._proc
         if process is not None and process.poll() is None:
             try:
@@ -132,58 +89,6 @@ class MumbleHost(Plugin):
             message + "\n",
             encoding="utf-8",
         )
-
-    def _discover_endpoint(self) -> tuple[str, int]:
-        raw_port = os.environ.get("SERVER_PORT", "").strip()
-        try:
-            public_port = int(raw_port)
-        except ValueError as exc:
-            raise RuntimeError(f"invalid SERVER_PORT: {raw_port!r}") from exc
-
-        if not (1 <= public_port <= 65535):
-            raise RuntimeError(f"SERVER_PORT out of range: {public_port}")
-
-        public_ip = self._public_ip_from_mcsv_files()
-        if not public_ip:
-            server_ip = os.environ.get("SERVER_IP", "").strip()
-            if server_ip and server_ip not in {"0.0.0.0", "::", "127.0.0.1"}:
-                public_ip = server_ip
-
-        if not public_ip:
-            raise RuntimeError(
-                "could not detect MCSV public IP from network metadata"
-            )
-
-        return public_ip, public_port
-
-    def _public_ip_from_mcsv_files(self) -> str | None:
-        try:
-            payload = json.loads(NETWORK_FILE.read_text(encoding="utf-8"))
-            mapping = str(payload.get("mapping", "")).strip()
-            candidate = mapping.split(":", 1)[0].strip()
-            if candidate and candidate not in {"0.0.0.0", "127.0.0.1"}:
-                socket.inet_aton(candidate)
-                return candidate
-        except Exception:
-            pass
-
-        try:
-            for line in SERVER_PROPERTIES.read_text(
-                encoding="utf-8",
-                errors="replace",
-            ).splitlines():
-                if not line.startswith("server-udp-ports="):
-                    continue
-                value = line.split("=", 1)[1]
-                first = value.split(",", 1)[0].strip()
-                candidate = first.split(":", 1)[0].strip()
-                if candidate and candidate not in {"0.0.0.0", "127.0.0.1"}:
-                    socket.inet_aton(candidate)
-                    return candidate
-        except Exception:
-            pass
-
-        return None
 
     @staticmethod
     def _fetch_json(
@@ -253,9 +158,7 @@ class MumbleHost(Plugin):
 
         tar_binary = pathlib.Path("/usr/bin/tar")
         if not tar_binary.exists():
-            raise RuntimeError(
-                "/usr/bin/tar is required by the MCSV runtime installer"
-            )
+            raise RuntimeError("/usr/bin/tar is required by the MCSV runtime installer")
 
         RUNTIME.mkdir(parents=True, exist_ok=True)
         LAYERS.mkdir(parents=True, exist_ok=True)
@@ -350,16 +253,11 @@ class MumbleHost(Plugin):
 
     def _bootstrap_and_start(self) -> None:
         try:
-            public_ip, primary_port = self._discover_endpoint()
-
             binary = ROOTFS / "usr/bin/mumble-server"
             if not binary.exists():
                 self._install_runtime()
 
             self._start_mumble()
-
-            pool_port = self._network_pool_first_port()
-            self._start_tcp_proxy(public_ip, pool_port)
         except Exception as exc:
             self._status(
                 f"stage=error error={type(exc).__name__}: {exc}"
@@ -373,14 +271,17 @@ class MumbleHost(Plugin):
         root = ROOTFS
         binary = root / "usr/bin/mumble-server"
 
+        if not binary.exists():
+            raise RuntimeError("mumble-server runtime is unavailable")
+
         data = runtime / "data"
         data.mkdir(parents=True, exist_ok=True)
         compat = self._prepare_compat_libs(root, runtime)
 
         config = data / "mumble-server.ini"
         config.write_text(
-            "host=127.0.0.1\n"
-            f"port={INTERNAL_MUMBLE_PORT}\n"
+            "host=0.0.0.0\n"
+            f"port={PORT}\n"
             "users=20\n"
             "database=/home/container/mumble-runtime/data/mumble-server.sqlite\n"
             "welcometext=<b>MCSV Mumble</b><br>Hosted by MCSV<br>"
@@ -409,9 +310,7 @@ class MumbleHost(Plugin):
 
         self._stdout = open(data / "mumble-stdout.log", "ab", buffering=0)
 
-        self._status(
-            f"stage=starting-mumble internal=127.0.0.1:{INTERNAL_MUMBLE_PORT}"
-        )
+        self._status(f"stage=starting port={PORT} compat_glibc=host")
         self._proc = subprocess.Popen(
             [
                 str(binary),
@@ -436,139 +335,9 @@ class MumbleHost(Plugin):
                 f"mumble exited rc={return_code}: {tail}"
             )
 
-    def _docker_gateway(self) -> str:
-        route = pathlib.Path("/proc/net/route").read_text(
-            encoding="utf-8",
-            errors="replace",
-        )
-        for line in route.splitlines()[1:]:
-            fields = line.split()
-            if len(fields) >= 3 and fields[1] == "00000000":
-                raw = bytes.fromhex(fields[2])
-                return socket.inet_ntoa(raw[::-1])
-        raise RuntimeError("Docker gateway not found")
-
-    def _hairpin_mapping_test(self, port: int, public_ip: str) -> str:
-        listener = None
-        outbound = None
-        accepted = None
-        try:
-            listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            listener.bind(("0.0.0.0", port))
-            listener.listen(2)
-            listener.settimeout(0.8)
-
-            outbound = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            outbound.settimeout(1.2)
-            try:
-                outbound.connect((public_ip, port))
-            except Exception:
-                return "not-mapped"
-
-            try:
-                accepted, _ = listener.accept()
-                return "mapped"
-            except Exception:
-                return "not-mapped"
-        except OSError as exc:
-            return f"bind-error:{exc.errno}"
-        finally:
-            for sock in (accepted, outbound, listener):
-                if sock is not None:
-                    try:
-                        sock.close()
-                    except Exception:
-                        pass
-
-    def _network_pool_first_port(self) -> int:
-        payload = json.loads(NETWORK_FILE.read_text(encoding="utf-8"))
-        mapping = str(payload.get("mapping", "")).strip()
-        parts = mapping.split(":")
-        if len(parts) < 2:
-            raise RuntimeError(f"invalid MCSV network mapping: {mapping!r}")
-        first = parts[1].split("-", 1)[0].strip()
-        port = int(first)
-        if not (1 <= port <= 65535):
-            raise RuntimeError(f"invalid MCSV network pool port: {port}")
-        return port
-
-    def _start_tcp_proxy(self, public_ip: str, public_port: int) -> None:
-        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        listener.bind(("0.0.0.0", public_port))
-        listener.listen(64)
-        listener.settimeout(1.0)
-        self._proxy_socket = listener
-
-        address = f"{public_ip}:{public_port}"
-        (self.data_folder / "connection.txt").write_text(
-            address + "\n",
-            encoding="utf-8",
-        )
         self._status(
-            f"stage=running pid={self._proc.pid} public={address} "
-            f"tcp_proxy=0.0.0.0:{public_port} "
-            f"mumble=127.0.0.1:{INTERNAL_MUMBLE_PORT}"
+            f"stage=running pid={self._proc.pid} port={PORT}"
         )
         self.logger.info(
-            f"Mumble public TCP endpoint {address}; "
-            f"internal Mumble 127.0.0.1:{INTERNAL_MUMBLE_PORT}"
+            f"Mumble server running on 0.0.0.0:{PORT}"
         )
-
-        while not self._stop_event.is_set():
-            try:
-                client, _ = listener.accept()
-            except socket.timeout:
-                continue
-            except OSError:
-                if self._stop_event.is_set():
-                    break
-                raise
-
-            threading.Thread(
-                target=self._proxy_client,
-                args=(client,),
-                name="MumbleTcpClient",
-                daemon=True,
-            ).start()
-
-    def _proxy_client(self, client: socket.socket) -> None:
-        upstream = None
-        try:
-            client.setblocking(False)
-            upstream = socket.create_connection(
-                ("127.0.0.1", INTERNAL_MUMBLE_PORT),
-                timeout=10,
-            )
-            upstream.setblocking(False)
-            sockets = [client, upstream]
-
-            while not self._stop_event.is_set():
-                readable, _, exceptional = select.select(
-                    sockets,
-                    [],
-                    sockets,
-                    1.0,
-                )
-                if exceptional:
-                    break
-
-                for source in readable:
-                    target = upstream if source is client else client
-                    data = source.recv(65536)
-                    if not data:
-                        return
-                    target.sendall(data)
-        except Exception:
-            pass
-        finally:
-            try:
-                client.close()
-            except Exception:
-                pass
-            if upstream is not None:
-                try:
-                    upstream.close()
-                except Exception:
-                    pass
