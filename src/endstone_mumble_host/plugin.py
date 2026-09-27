@@ -6,6 +6,7 @@ import pathlib
 import platform
 import shutil
 import socket
+import ssl
 import subprocess
 import threading
 import time
@@ -48,7 +49,7 @@ GLIBC_PREFIXES = (
 
 class MumbleHost(Plugin):
     prefix = "MumbleHost"
-    version = "0.2.1.dev3"
+    version = "0.2.1.dev4"
     api_version = "0.11"
     description = "One-file MCSV Mumble server host with automatic runtime install"
     authors = ["SamSoSleepy"]
@@ -130,22 +131,31 @@ class MumbleHost(Plugin):
 
         if gateway:
             server_uuid = os.environ.get("P_SERVER_UUID", "")
-            for port in (8080, 8443, 443, 80):
-                for path in ("/", "/api/system", f"/api/servers/{server_uuid}"):
-                    url = f"http://{gateway}:{port}{path}"
-                    try:
-                        req = urllib.request.Request(url, method="GET")
-                        with urllib.request.urlopen(req, timeout=2) as response:
-                            lines.append(
-                                f"probe {url} status={response.status} "
-                                f"server={response.headers.get('Server','')}"
-                            )
-                    except urllib.error.HTTPError as exc:
-                        lines.append(f"probe {url} status={exc.code}")
-                    except Exception as exc:
+            context = ssl._create_unverified_context()
+            for path in ("/", "/api/system", f"/api/servers/{server_uuid}"):
+                url = f"https://{gateway}:443{path}"
+                try:
+                    req = urllib.request.Request(url, method="GET")
+                    with urllib.request.urlopen(
+                        req,
+                        timeout=3,
+                        context=context,
+                    ) as response:
+                        body = response.read(1200).decode("utf-8", errors="replace")
                         lines.append(
-                            f"probe {url} error={type(exc).__name__}"
+                            f"probe {url} status={response.status} "
+                            f"server={response.headers.get('Server','')} "
+                            f"body={body!r}"
                         )
+                except urllib.error.HTTPError as exc:
+                    body = exc.read(1200).decode("utf-8", errors="replace")
+                    lines.append(
+                        f"probe {url} status={exc.code} body={body!r}"
+                    )
+                except Exception as exc:
+                    lines.append(
+                        f"probe {url} error={type(exc).__name__}: {exc}"
+                    )
 
         (self.data_folder / "network-probe.txt").write_text(
             "\n".join(lines) + "\n",
