@@ -1,85 +1,66 @@
 # VoiceChat-Mumble-MCSV
 
-Mumble Server host for **MCSV Endstone servers**.
+**One-file Endstone plugin** for hosting a Mumble Server directly inside an MCSV server.
 
-This repository intentionally contains only the MCSV-side Mumble hosting component. It does **not** contain the Android VC Mumla client, Minecraft proximity bridge, Item Mic addon, or VC Mumble Server APK.
+Upload the wheel to `/plugins`, restart MCSV, and the plugin does the rest.
+
+It intentionally contains only the MCSV-side Mumble hosting component. It does **not** contain VC Mumla, Minecraft proximity routing, Item Mic, or the Android VC Mumble Server app.
+
+## One-file install
+
+1. Download the latest `endstone_mumble_host-*.whl` from GitHub Releases.
+2. Upload the wheel to MCSV's `/plugins` directory.
+3. Restart the MCSV server.
+4. On first start, the plugin automatically downloads and extracts the pinned official Mumble runtime.
+5. Mumble starts automatically and follows the Endstone server lifecycle.
+
+No separate runtime installer is required.
+
+The first-start status is written to:
+
+```text
+/plugins/mumble_host/host-status.txt
+```
+
+Possible states include:
+
+```text
+stage=installing
+stage=downloading layer=1/13
+stage=extracting layer=1/13
+stage=starting port=18655 compat_glibc=host
+stage=running pid=<pid> port=18655
+```
 
 ## Verified setup
 
-Tested successfully on 2026-09-27 with:
+Tested on MCSV with:
 
-- MCSV / Pelican Endstone container
 - Linux x86_64
 - host glibc 2.41
 - Endstone 0.11.12
 - Mumble Server 1.6.870
-- official image: `mumblevoip/mumble-server:v1.6.870-acme`
-- public MCSV allocation: TCP + UDP on the same allocated port
-- verified public TCP access from external probes
+- official image `mumblevoip/mumble-server:v1.6.870-acme`
+- same allocated port exposed for TCP and UDP
+- external public TCP connectivity verified
 
-The live test used port `18655` and was reachable as:
+The current MCSV deployment uses:
 
 ```text
 sv7.mcsv.me:18655
 ```
 
-The hostname and allocated port will be different on other MCSV servers.
+## Runtime installation
 
-## How it works
-
-```text
-MCSV container
-├─ Minecraft Bedrock + Endstone
-└─ MumbleHost Endstone plugin
-   └─ mumble-server child process
-      ├─ TCP <allocated-port>
-      └─ UDP <allocated-port>
-```
-
-MCSV's Endstone Python environment can spawn child processes, but its `PATH` is restricted. The host plugin therefore launches the Mumble binary by absolute path.
-
-The runtime is extracted from the official Mumble container image into:
+The plugin downloads the pinned official Linux/amd64 Mumble image from Docker Hub only when:
 
 ```text
-/home/container/mumble-runtime
+/home/container/mumble-runtime/rootfs/usr/bin/mumble-server
 ```
 
-Mumble is started with the **host glibc** while Qt/OpenSSL/Protobuf/Ice/libproxy libraries are supplied from the extracted Mumble image. This avoids the `GLIBC_PRIVATE` symbol conflict that occurs when the image libc is mixed with MCSV's dynamic loader.
+does not exist.
 
-## Repository layout
-
-- `src/endstone_mumble_host/plugin.py` — starts/stops Mumble with the Endstone server lifecycle
-- `tools/install_runtime.py` — installs the pinned Mumble runtime from Docker Hub
-- `pyproject.toml` — builds the Endstone wheel
-- `.github/workflows/build-wheel.yml` — CI wheel build
-
-## Install on MCSV
-
-### 1. Pick an allocated MCSV port
-
-Use one of the extra ports assigned to the MCSV server. Mumble needs the **same port for TCP and UDP**.
-
-The tested source defaults to:
-
-```text
-18655
-```
-
-If your allocation is different, change `PORT` in:
-
-```text
-src/endstone_mumble_host/plugin.py
-```
-
-### 2. Prepare the Mumble runtime
-
-Run:
-
-```bash
-python3 tools/install_runtime.py
-```
-
-The installer downloads and extracts the pinned official Mumble image:
+Pinned image:
 
 ```text
 mumblevoip/mumble-server:v1.6.870-acme
@@ -87,52 +68,32 @@ linux/amd64 manifest:
 sha256:9322d72c8ac9f61233dd74ba662194654ff1fc0e5ad6c26967fc708d3d799b82
 ```
 
-### 3. Build the Endstone wheel
-
-```bash
-python3 -m pip install build
-python3 -m build --wheel
-```
-
-Upload the generated `.whl` from `dist/` into MCSV's:
+Downloaded layers are cached in:
 
 ```text
-/plugins
+/home/container/mumble-runtime/layers
 ```
 
-Then restart the MCSV server.
+After the first successful installation, normal MCSV restarts reuse the existing runtime and start Mumble immediately.
 
-### 4. Check status
+## Why the compatibility library layer exists
 
-The plugin writes:
+MCSV's Endstone environment can spawn child processes, but its Python `PATH` is restricted.
 
-```text
-/plugins/mumble_host/host-status.txt
-```
+The Mumble runtime is therefore launched by absolute path. Mumble uses the **MCSV host glibc**, while Qt/OpenSSL/Protobuf/Ice/libproxy libraries come from the pinned official Mumble image.
 
-Expected output:
+This avoids the `GLIBC_PRIVATE` symbol conflict that occurs if the image libc is mixed with MCSV's dynamic loader.
 
-```text
-stage=running pid=<pid> port=18655
-```
+## Current Mumble configuration
 
-Mumble logs are stored in:
-
-```text
-/home/container/mumble-runtime/data/
-```
-
-## Mumble configuration
-
-The current tested configuration is generated automatically with:
-
-- bind address: `0.0.0.0`
-- users: `20`
+- bind: `0.0.0.0`
+- port: `18655`
+- maximum users: `20`
 - password: none
 - Bonjour: disabled
-- SQLite database stored under `/home/container/mumble-runtime/data`
+- SQLite database: `/home/container/mumble-runtime/data/mumble-server.sqlite`
 
-The welcome text is:
+Welcome text:
 
 ```text
 Hosted by MCSV
@@ -140,6 +101,14 @@ Plugin Mumble connate by SamSoSleepy
 Discord : https://discord.gg/FnmWw7nWyq
 ```
 
+## Repository layout
+
+- `src/endstone_mumble_host/plugin.py` — complete one-file bootstrap + Mumble lifecycle
+- `tools/install_runtime.py` — optional manual repair/debug installer
+- `.github/workflows/build-wheel.yml` — wheel CI
+
 ## Important
 
-This repository only hosts a normal Mumble server on MCSV. Minecraft proximity routing is a separate component and is not implemented here.
+Port `18655` is an allocated port of the MCSV server used for this project. Another MCSV server must use one of its own allocated ports.
+
+This repository only hosts a normal Mumble server on MCSV. Minecraft proximity routing remains a separate component.

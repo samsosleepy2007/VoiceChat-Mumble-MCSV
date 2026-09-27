@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "endstone-mumble-host"
-version = "0.1.1"
-description = "Run a Mumble Server child process inside an MCSV Endstone container"
+version = "0.2.0"
+description = "One-file MCSV Mumble Server host with automatic runtime installation"
 requires-python = ">=3.11"
 dependencies = ["endstone>=0.11.0"]
 
