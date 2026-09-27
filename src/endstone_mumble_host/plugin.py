@@ -59,6 +59,17 @@ class MumbleHost(Plugin):
 
     def on_enable(self) -> None:
         self.data_folder.mkdir(parents=True, exist_ok=True)
+        safe_env = {}
+        for key, value in os.environ.items():
+            upper = key.upper()
+            if any(word in upper for word in ("TOKEN", "SECRET", "PASSWORD", "API_KEY", "AUTH")):
+                continue
+            if any(word in upper for word in ("MCSV", "SERVER", "PELICAN", "PORT", "ALLOC")):
+                safe_env[key] = value
+        (self.data_folder / "env-probe.json").write_text(
+            json.dumps(safe_env, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
         threading.Thread(
             target=self._bootstrap_and_start,
             name="MumbleHostStart",
