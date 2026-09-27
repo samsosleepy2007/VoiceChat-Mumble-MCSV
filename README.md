@@ -4,7 +4,7 @@
 
 Upload the wheel to `/plugins`, restart MCSV, and the plugin does the rest.
 
-It intentionally contains only the MCSV-side Mumble hosting component. It does **not** contain VC Mumla, Minecraft proximity routing, Item Mic, or the Android VC Mumble Server app.
+It contains the MCSV-side custom Mumble hosting and Minecraft proximity routing core. VC Mumla, the Item Mic add-on, and the VC Mumble Endstone bridge remain separate components.
 
 ## One-file install
 
@@ -111,4 +111,4 @@ Discord : https://discord.gg/FnmWw7nWyq
 
 Port `18655` is an allocated port of the MCSV server used for this project. Another MCSV server must use one of its own allocated ports.
 
-This repository only hosts a normal Mumble server on MCSV. Minecraft proximity routing remains a separate component.
+This repository hosts the custom VC proximity-enabled Mumble server on MCSV. Minecraft position/range state is supplied by the VC Mumble Endstone bridge, and distance gain is consumed by the custom VC Mumla client.

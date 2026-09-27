@@ -1,4 +1,7 @@
 name: Build VC Proximity Mumble Linux
+
+permissions:
+  contents: write
 # v0.3 proximity artifact
 
 on:
@@ -83,3 +86,30 @@ jobs:
           name: mumble-host-v0.3-proximity
           path: out/
           retention-days: 14
+
+      - name: Publish v0.3.0 release
+        if: contains(github.event.head_commit.message, '[release]')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > RELEASE_BODY.md <<'EOF'
+          ## MumbleHost v0.3.0
+
+          One-file Endstone plugin for MCSV with the custom VC Mumble proximity core.
+
+          - Mumble Server 1.6.870 Linux x86_64 custom build
+          - Minecraft dimension + XYZ proximity routing
+          - voice range routing from VC Mumble Endstone
+          - per-listener distance attenuation using the VCG1 trailer
+          - compatible with the custom VC Mumla client
+          - authenticated relay to the local Endstone proximity bridge
+          - automatic official Mumble runtime bootstrap on first start
+
+          Upload the wheel to `/plugins` and restart the MCSV server.
+          The current tested deployment uses port `18655`; installer/API integration can provide the correct allocated port for other MCSV servers.
+          EOF
+
+          gh release create v0.3.0 out/*.whl out/SHA256SUMS.txt \
+            --target "$GITHUB_SHA" \
+            --title "MumbleHost v0.3.0" \
+            --notes-file RELEASE_BODY.md

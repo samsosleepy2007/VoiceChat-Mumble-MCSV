@@ -52,7 +52,7 @@ GLIBC_PREFIXES = (
 
 class MumbleHost(Plugin):
     prefix = "MumbleHost"
-    version = "0.3.0.dev1"
+    version = "0.3.0"
     api_version = "0.11"
     description = "MCSV Mumble server with Minecraft proximity routing"
     authors = ["SamSoSleepy"]
