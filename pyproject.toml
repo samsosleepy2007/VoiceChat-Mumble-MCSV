@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "endstone-mumble-host"
+version = "0.1.1"
+description = "Run a Mumble Server child process inside an MCSV Endstone container"
+requires-python = ">=3.11"
+dependencies = ["endstone>=0.11.0"]
+
+[project.entry-points."endstone"]
+mumble_host = "endstone_mumble_host:MumbleHost"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
