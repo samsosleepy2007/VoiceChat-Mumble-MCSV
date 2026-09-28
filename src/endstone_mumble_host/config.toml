@@ -1,0 +1,19 @@
+[tracking]
+interval_ticks = 2
+position_epsilon = 0.05
+rotation_epsilon = 1.0
+heartbeat_seconds = 15
+
+[mumble]
+port = 18655
+users = 20
+
+[local_state]
+host = "127.0.0.1"
+port = 47855
+max_queue = 4096
+
+[voice]
+default_range = 30
+max_range = 150
+default_attenuation_level = 3
