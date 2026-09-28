@@ -37,6 +37,14 @@ mumble-server-vc :18655
 - local state feed เป็น localhost-only
 - `/vcb` แสดงสถานะ Mumble/Range/Mic และมีปุ่ม restart host สำหรับ Operator
 
+## Welcome text
+
+```text
+Hosted by MCSV
+Plugin Mumble connate by SamSoSleepy
+Discord : https://discord.gg/FnmWw7nWyq
+```
+
 ## Default ports
 
 - Mumble: `18655` TCP/UDP
