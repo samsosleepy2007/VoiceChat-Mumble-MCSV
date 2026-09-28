@@ -277,7 +277,7 @@ class MumbleRuntimeHost:
             f"port={self._port}\n"
             f"users={self._users}\n"
             "database=/home/container/mumble-runtime/data/mumble-server.sqlite\n"
-            "welcometext=<b>VC Mumble MCSV</b><br>Unified Item Mic proximity\n"
+            "welcometext=Hosted by MCSV<br>Plugin Mumble connate by SamSoSleepy<br>Discord : https://discord.gg/FnmWw7nWyq\n"
             "logfile=/home/container/mumble-runtime/data/mumble-server.log\n"
             "pidfile=\n"
             "bonjour=false\n",
