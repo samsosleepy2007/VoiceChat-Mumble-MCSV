@@ -3,6 +3,7 @@ name: Attach Item Mic Addon
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -12,35 +13,43 @@ jobs:
     if: contains(github.event.head_commit.message, '[attach-addon]')
     runs-on: ubuntu-latest
     steps:
-      - name: Download and verify Item Mic v2.9.0
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore tested Item Mic v2.10.0 asset
         run: |
-          BASE="https://github.com/samsosleepy2007/VoiceChat-Minecraft-bedrock-Mumble/releases/download/v0.6.0-beta.12"
-          curl -fL -o VC_Mumble_ItemMic_v2.9.0.mcaddon "$BASE/VC_Mumble_ItemMic_v2.9.0.mcaddon"
-          curl -fL -o upstream-SHA256SUMS.txt "$BASE/SHA256SUMS.txt"
+          git fetch origin release-assets-v0.4.0-itemmic
+          git show origin/release-assets-v0.4.0-itemmic:release-assets/VC_Mumble_ItemMic_v2.10.0.mcaddon             > VC_Mumble_ItemMic_v2.10.0.mcaddon
 
-          grep '  VC_Mumble_ItemMic_v2.9.0.mcaddon$' upstream-SHA256SUMS.txt > addon-SHA256.txt
-          test -s addon-SHA256.txt
-          sha256sum -c addon-SHA256.txt
+          echo "201f0c5ee53f31b60689e20fb8571a2d8d8b1e2ef2a1da73046fcc83e61ef166  VC_Mumble_ItemMic_v2.10.0.mcaddon"             | sha256sum -c -
 
-      - name: Update v0.3.0 release assets
+      - name: Refresh v0.4.0 release assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download v0.3.0 \
-            --repo "${{ github.repository }}" \
-            --pattern "endstone_mumble_host-0.3.0-py3-none-any.whl" \
-            --dir .
+          gh release download v0.4.0             --repo "${{ github.repository }}"             --pattern "endstone_mumble_host-0.4.0-py3-none-any.whl"             --dir .
 
-          gh release delete-asset v0.3.0 VC_Mumble_ItemMic_v2.8.0.mcaddon \
-            --repo "${{ github.repository }}" -y || true
+          sha256sum             endstone_mumble_host-0.4.0-py3-none-any.whl             VC_Mumble_ItemMic_v2.10.0.mcaddon             > SHA256SUMS.txt
 
-          sha256sum \
-            endstone_mumble_host-0.3.0-py3-none-any.whl \
-            VC_Mumble_ItemMic_v2.9.0.mcaddon \
-            > SHA256SUMS.txt
+          gh release upload v0.4.0             VC_Mumble_ItemMic_v2.10.0.mcaddon             SHA256SUMS.txt             --repo "${{ github.repository }}"             --clobber
 
-          gh release upload v0.3.0 \
-            VC_Mumble_ItemMic_v2.9.0.mcaddon \
-            SHA256SUMS.txt \
-            --repo "${{ github.repository }}" \
-            --clobber
+      - name: Mention bundled addon in release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view v0.4.0             --repo "${{ github.repository }}"             --json body -q .body > RELEASE_BODY.md
+
+          if ! grep -q "VC_Mumble_ItemMic_v2.10.0.mcaddon" RELEASE_BODY.md; then
+            cat >> RELEASE_BODY.md <<'EOF'
+
+          ### Bundled Item Mic Addon
+
+          - `VC_Mumble_ItemMic_v2.10.0.mcaddon`
+          - settle-only Voice Range slider
+          - 30-second range cooldown with countdown
+          - Mic ON/OFF + Voice Range integration with MumbleHost v0.4.0
+          EOF
+          fi
+
+          gh release edit v0.4.0             --repo "${{ github.repository }}"             --notes-file RELEASE_BODY.md
