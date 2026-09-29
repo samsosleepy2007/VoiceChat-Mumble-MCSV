@@ -2,12 +2,12 @@ name: Build VC Proximity Mumble Linux
 
 permissions:
   contents: write
-# v0.3 proximity artifact
+# v0.5 SleepyPhone call-routing artifact
 
 on:
   workflow_dispatch:
   push:
-    branches: [main, feature/mcsv-proximity-v0.3]
+    branches: [main, feature/mcsv-proximity-v0.3, feature/sleepyphone-call-v0.5.0]
 
 jobs:
   build:
@@ -65,7 +65,7 @@ jobs:
           file .build/mumble-build/mumble-server
           ldd .build/mumble-build/mumble-server
           strings .build/mumble-build/mumble-server | grep -F VC-PROX-FEED
-          strings .build/mumble-build/mumble-server | grep -F VCG1 || true
+          strings .build/mumble-build/mumble-server | grep -F VCG1 || true\n          strings .build/mumble-build/mumble-server | grep -F call-speaker
 
       - name: Build proximity plugin wheel
         run: |
@@ -83,17 +83,17 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: mumble-host-v0.3-proximity
+          name: mumble-host-v0.5-call-routing
           path: out/
           retention-days: 14
 
-      - name: Publish v0.3.0 release
+      - name: Publish experimental release
         if: contains(github.event.head_commit.message, '[release]')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           cat > RELEASE_BODY.md <<'EOF'
-          ## MumbleHost v0.3.0
+          ## MumbleHost call-routing build
 
           One-file Endstone plugin for MCSV with the custom VC Mumble proximity core.
 
