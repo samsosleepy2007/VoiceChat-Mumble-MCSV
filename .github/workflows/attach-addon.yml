@@ -17,39 +17,82 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Restore tested Item Mic v2.10.0 asset
+      - name: Restore tested Item Mic v2.11.2 asset
         run: |
           git fetch origin release-assets-v0.4.0-itemmic
-          git show origin/release-assets-v0.4.0-itemmic:release-assets/VC_Mumble_ItemMic_v2.10.0.mcaddon             > VC_Mumble_ItemMic_v2.10.0.mcaddon
+          for part in 00 01 02 03 04 05 06; do
+            git show "origin/release-assets-v0.4.0-itemmic:release-assets/v2.11.2/part${part}.b64"
+          done | tr -d '\r\n' > addon.b64
 
-          echo "201f0c5ee53f31b60689e20fb8571a2d8d8b1e2ef2a1da73046fcc83e61ef166  VC_Mumble_ItemMic_v2.10.0.mcaddon"             | sha256sum -c -
+          base64 --decode addon.b64 > VC_Mumble_ItemMic_v2.11.2.mcaddon
+          echo "6a41951921bbaa5897316cdde963d0f0c06028cbddae9937799a72656fdadc66  VC_Mumble_ItemMic_v2.11.2.mcaddon" | sha256sum -c -
+          unzip -t VC_Mumble_ItemMic_v2.11.2.mcaddon
 
       - name: Refresh v0.4.0 release assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download v0.4.0             --repo "${{ github.repository }}"             --pattern "endstone_mumble_host-0.4.0-py3-none-any.whl"             --dir .
+          gh release download v0.4.0 \
+            --repo "${{ github.repository }}" \
+            --pattern "endstone_mumble_host-0.4.0-py3-none-any.whl" \
+            --dir .
 
-          sha256sum             endstone_mumble_host-0.4.0-py3-none-any.whl             VC_Mumble_ItemMic_v2.10.0.mcaddon             > SHA256SUMS.txt
+          gh release delete-asset v0.4.0 VC_Mumble_ItemMic_v2.10.0.mcaddon \
+            --repo "${{ github.repository }}" -y || true
+          gh release delete-asset v0.4.0 VC_Mumble_ItemMic_v2.11.1.mcaddon \
+            --repo "${{ github.repository }}" -y || true
 
-          gh release upload v0.4.0             VC_Mumble_ItemMic_v2.10.0.mcaddon             SHA256SUMS.txt             --repo "${{ github.repository }}"             --clobber
+          sha256sum \
+            endstone_mumble_host-0.4.0-py3-none-any.whl \
+            VC_Mumble_ItemMic_v2.11.2.mcaddon \
+            > SHA256SUMS.txt
 
-      - name: Mention bundled addon in release notes
+          gh release upload v0.4.0 \
+            VC_Mumble_ItemMic_v2.11.2.mcaddon \
+            SHA256SUMS.txt \
+            --repo "${{ github.repository }}" \
+            --clobber
+
+      - name: Update v0.4.0 release notes
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view v0.4.0             --repo "${{ github.repository }}"             --json body -q .body > RELEASE_BODY.md
+          cat > RELEASE_BODY.md <<'EOF'
+          ## MumbleHost v0.4.0 — Unified MCSV proximity voice
 
-          if ! grep -q "VC_Mumble_ItemMic_v2.10.0.mcaddon" RELEASE_BODY.md; then
-            cat >> RELEASE_BODY.md <<'EOF'
+          One Endstone plugin now handles the complete MCSV-side system:
+          - hosts Mumble Server 1.6.870 on port 18655,
+          - reads Minecraft player position and dimension directly,
+          - reads Item Mic ON/OFF state,
+          - accepts Item Mic Voice Range request/ACK,
+          - sends state only through localhost UDP 127.0.0.1:47855,
+          - applies native proximity routing and smooth distance attenuation,
+          - uses default attenuation level 3,
+          - uses the Minecraft player name as the Mumble username.
+
+          Android/mobile bridge, bridge secret, and the separate VC Mumble Endstone plugin are not required in this MCSV mode.
+
+          ### Mumble welcome text
+
+          Hosted by MCSV
+          Plugin Mumble connate by SamSoSleepy
+          Discord : https://discord.gg/FnmWw7nWyq
+
+          ### Install
+
+          Upload `endstone_mumble_host-0.4.0-py3-none-any.whl` to the MCSV Endstone `/plugins` directory and restart the server.
+
+          The wheel includes the verified `mumble-server-vc` proximity binary.
 
           ### Bundled Item Mic Addon
 
-          - `VC_Mumble_ItemMic_v2.10.0.mcaddon`
+          - `VC_Mumble_ItemMic_v2.11.2.mcaddon`
+          - fixed missing Item Mic icon/resource-pack texture
           - settle-only Voice Range slider
           - 30-second range cooldown with countdown
           - Mic ON/OFF + Voice Range integration with MumbleHost v0.4.0
           EOF
-          fi
 
-          gh release edit v0.4.0             --repo "${{ github.repository }}"             --notes-file RELEASE_BODY.md
+          gh release edit v0.4.0 \
+            --repo "${{ github.repository }}" \
+            --notes-file RELEASE_BODY.md
