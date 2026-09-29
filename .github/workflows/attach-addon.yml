@@ -14,32 +14,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Restore tested Item Mic v2.11.2 asset
+      - name: Verify tested Item Mic v2.15.1 asset
         run: |
-          git fetch origin release-assets-v0.4.0-itemmic
-          for part in \
-            part00.b64 \
-            part01.b64 \
-            part02a.b64 \
-            part02b0.b64 \
-            part02b1.b64 \
-            part02b2.b64 \
-            part02c0.b64 \
-            part02c1.b64 \
-            part02c2.b64 \
-            part03.b64 \
-            part04.b64 \
-            part05.b64 \
-            part06.b64; do
-            git show "origin/release-assets-v0.4.0-itemmic:release-assets/v2.11.2/${part}"
-          done | tr -d '\r\n' > addon.b64
-
-          base64 --decode addon.b64 > VC_Mumble_ItemMic_v2.11.2.mcaddon
-          echo "6a41951921bbaa5897316cdde963d0f0c06028cbddae9937799a72656fdadc66  VC_Mumble_ItemMic_v2.11.2.mcaddon" | sha256sum -c -
-          unzip -t VC_Mumble_ItemMic_v2.11.2.mcaddon
+          cp release-assets/VC_Mumble_ItemMic_v2.15.1.mcaddon .
+          echo "5449afa5d44f681835eeee705c079a59fb9eed1219eb5c49bce5932e0ccab147  VC_Mumble_ItemMic_v2.15.1.mcaddon" | sha256sum -c -
+          unzip -t VC_Mumble_ItemMic_v2.15.1.mcaddon
 
       - name: Refresh v0.4.0 release assets
         env:
@@ -50,18 +30,23 @@ jobs:
             --pattern "endstone_mumble_host-0.4.0-py3-none-any.whl" \
             --dir .
 
-          gh release delete-asset v0.4.0 VC_Mumble_ItemMic_v2.10.0.mcaddon \
-            --repo "${{ github.repository }}" -y || true
-          gh release delete-asset v0.4.0 VC_Mumble_ItemMic_v2.11.1.mcaddon \
-            --repo "${{ github.repository }}" -y || true
+          gh release view v0.4.0 \
+            --repo "${{ github.repository }}" \
+            --json assets \
+            --jq '.assets[].name' \
+            | grep '^VC_Mumble_ItemMic_.*\.mcaddon$' \
+            | while IFS= read -r asset; do
+                [ -n "$asset" ] && gh release delete-asset v0.4.0 "$asset" \
+                  --repo "${{ github.repository }}" -y
+              done || true
 
           sha256sum \
             endstone_mumble_host-0.4.0-py3-none-any.whl \
-            VC_Mumble_ItemMic_v2.11.2.mcaddon \
+            VC_Mumble_ItemMic_v2.15.1.mcaddon \
             > SHA256SUMS.txt
 
           gh release upload v0.4.0 \
-            VC_Mumble_ItemMic_v2.11.2.mcaddon \
+            VC_Mumble_ItemMic_v2.15.1.mcaddon \
             SHA256SUMS.txt \
             --repo "${{ github.repository }}" \
             --clobber
@@ -99,10 +84,14 @@ jobs:
 
           ### Bundled Item Mic Addon
 
-          - `VC_Mumble_ItemMic_v2.11.2.mcaddon`
-          - fixed missing Item Mic icon/resource-pack texture
-          - settle-only Voice Range slider
-          - 30-second range cooldown with countdown
+          - `VC_Mumble_ItemMic_v2.15.1.mcaddon`
+          - SleepyPhone one-time registration with IC name, 4-digit number, and persistent Phone ID
+          - contacts with custom aliases plus real IC names
+          - Favorites on the SleepyPhone home screen
+          - messaging by number or saved contact
+          - anonymous messaging support
+          - inbox with unread count and [!] unread marker
+          - DDUI button color codes removed for Bedrock compatibility
           - Mic ON/OFF + Voice Range integration with MumbleHost v0.4.0
           EOF
 
