@@ -28,7 +28,7 @@ ATTENUATION_LEVELS: dict[int, str] = {
 
 class MumbleHost(Plugin):
     prefix = "MumbleHost"
-    version = "0.4.0"
+    version = "0.5.0"
     api_version = "0.11"
     description = "Unified MCSV Mumble server + Item Mic proximity routing"
     authors = ["SamSoSleepy"]
@@ -56,6 +56,7 @@ class MumbleHost(Plugin):
         super().__init__()
         self._states: dict[str, PlayerState] = {}
         self._bindings: dict[str, dict[str, Any]] = {}
+        self._calls: dict[str, dict[str, Any]] = {}
         self._host: MumbleRuntimeHost | None = None
         self._state_sink: LocalStateSink | None = None
 
@@ -121,6 +122,7 @@ class MumbleHost(Plugin):
 
         self._save_bindings()
         self._states.clear()
+        self._calls.clear()
         self.logger.info("MumbleHost Unified disabled")
 
     def _load_settings(self) -> None:
@@ -366,6 +368,8 @@ class MumbleHost(Plugin):
                 "mumbleName": stale.name,
             })
 
+        self._sync_call_sessions()
+
         host_running = self._host.running if self._host is not None else False
         if host_running and not self._last_host_running:
             self._send_full_snapshot()
@@ -388,7 +392,68 @@ class MumbleHost(Plugin):
         self._state_send({"type": "sync_begin", "count": len(self._states)})
         for key, state in self._states.items():
             self._state_send(self._state_message(key, state))
+        for call in self._calls.values():
+            self._state_send(call)
         self._state_send({"type": "sync_end", "count": len(self._states)})
+
+    def _collect_call_sessions(self) -> dict[str, dict[str, Any]]:
+        prefix = "vcmumble.call.active."
+        pending: dict[str, dict[str, tuple[str, bool]]] = {}
+
+        for player in self.server.online_players:
+            try:
+                tags = list(player.scoreboard_tags)
+            except Exception:
+                continue
+
+            for tag in tags:
+                if not tag.startswith(prefix):
+                    continue
+                payload = tag[len(prefix):]
+                parts = payload.rsplit(".", 2)
+                if len(parts) != 3:
+                    continue
+                call_id, role, speaker_raw = parts
+                call_id = call_id.strip()
+                role = role.strip().lower()
+                if not call_id or role not in {"a", "b"}:
+                    continue
+                speaker = speaker_raw.strip() == "1"
+                pending.setdefault(call_id, {})[role] = (str(player.name), speaker)
+
+        sessions: dict[str, dict[str, Any]] = {}
+        for call_id, roles in pending.items():
+            party_a = roles.get("a")
+            party_b = roles.get("b")
+            if party_a is None or party_b is None:
+                continue
+            if party_a[0].casefold() == party_b[0].casefold():
+                continue
+            sessions[call_id] = {
+                "type": "call_state",
+                "callId": call_id,
+                "partyA": party_a[0],
+                "partyB": party_b[0],
+                "speakerA": bool(party_a[1]),
+                "speakerB": bool(party_b[1]),
+            }
+        return sessions
+
+    def _sync_call_sessions(self) -> None:
+        current = self._collect_call_sessions()
+
+        for call_id, payload in current.items():
+            previous = self._calls.get(call_id)
+            if previous != payload:
+                self._state_send(payload)
+
+        for call_id in set(self._calls).difference(current):
+            self._state_send({
+                "type": "call_end",
+                "callId": call_id,
+            })
+
+        self._calls = current
 
     def _broadcast_current_player(self, player: Player) -> None:
         state = self._snapshot_if_valid(player)
