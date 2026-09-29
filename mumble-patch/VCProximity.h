@@ -21,6 +21,15 @@ void clearPlayers();
 void touchPlayers();
 int playerCount();
 
+void updateCall(const QString &callId,
+                const QString &partyA,
+                const QString &partyB,
+                bool speakerA,
+                bool speakerB);
+void removeCall(const QString &callId);
+void clearCalls();
+int callCount();
+
 // Returns a per-listener volume factor in the range [0, 1]. When proximity is
 // disabled, stock Mumble routing is preserved with factor 1.0.
 float attenuationFactor(const QString &speakerName, const QString &listenerName);
