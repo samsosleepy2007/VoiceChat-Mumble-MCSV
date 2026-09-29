@@ -30,7 +30,7 @@ class MumbleHost(Plugin):
     prefix = "MumbleHost"
     version = "0.5.0"
     api_version = "0.11"
-    description = "Unified MCSV Mumble server + Item Mic proximity routing"
+    description = "Unified MCSV Mumble server + Item Mic proximity + SleepyPhone call routing"
     authors = ["SamSoSleepy"]
 
     commands = {
