@@ -7,7 +7,7 @@ permissions:
 on:
   workflow_dispatch:
   push:
-    branches: [main, feature/mcsv-proximity-v0.3, feature/sleepyphone-call-v0.5.0]
+    branches: [main, feature/mcsv-proximity-v0.3, feature/sleepyphone-call-v0.5.0, feature/sleepyvoice-range-micoff-v0.5.1, fix/mic-failclosed-range-20260930]
 
 jobs:
   build:
@@ -17,6 +17,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Test mute policy and patch routing against alternate audio contexts
+        run: |
+          python3 tests/test_unified_contract.py
+          python3 tests/test_all_contexts_gate.py
 
       - name: Install build dependencies
         run: |
