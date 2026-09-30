@@ -85,8 +85,9 @@ jobs:
           python3 -m build --wheel
           cp .build/mumble-build/mumble-server out/mumble-server-vc
           cp dist/*.whl out/
+          cp staging/SleepyVoiceChat-DDUI-hotfix-v2.18.2.mcaddon out/
           chmod +x out/mumble-server-vc
-          sha256sum out/mumble-server-vc out/*.whl > out/SHA256SUMS.txt
+          sha256sum out/mumble-server-vc out/*.whl out/*.mcaddon > out/SHA256SUMS.txt
           unzip -l dist/*.whl | grep -F 'endstone_mumble_host/bin/mumble-server-vc'
 
       - uses: actions/upload-artifact@v4
@@ -115,6 +116,7 @@ jobs:
           Assets:
           - Endstone plugin wheel (includes freshly compiled mumble-server-vc)
           - Standalone mumble-server-vc (Linux x86_64)
+          - Item Mic v2.18.2 BP/RP DDUI-hotfix .mcaddon
           - SHA256SUMS.txt
 
           Upload the wheel into the MCSV /plugins folder and restart the server
@@ -122,7 +124,46 @@ jobs:
           10/20/30/60 before accepting this build as stable.
           EOF
 
-          gh release create "v$VERSION" out/*.whl out/mumble-server-vc out/SHA256SUMS.txt \
+          gh release create "v$VERSION" out/*.whl out/*.mcaddon out/mumble-server-vc out/SHA256SUMS.txt \
             --target "$GITHUB_SHA" \
             --title "MumbleHost v$VERSION" \
             --notes-file RELEASE_BODY.md
+
+      - name: Publish test-only release candidate
+        if: github.ref == 'refs/heads/fix/mic-failclosed-range-20260930' && contains(github.event.head_commit.message, '[release-rc]')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=v0.5.2-rc.1
+          cat > RC_NOTES.md <<'EOF'
+          ## Sleepy Voice Chat MumbleHost v0.5.2 release candidate
+
+          **Testing build, not yet verified stable.**
+          Freshly compiled Mumble Server 1.6.870 plus Endstone wheel and
+          complete Item Mic v2.18.2 BP/RP DDUI hotfix.
+
+          Changes:
+          - fail-closed Mic OFF from Minecraft through Endstone and Mumble;
+          - sender-level gate for normal speech, calls and alternate/whisper paths;
+          - reject stale/invalid player state, restore range writer across restart;
+          - suspend DDUI refresh while range slider is actively interactive;
+          - range ACK timing diagnostics and MIC_LOCAL/MIC_STATE/VC-PROX-MIC logs.
+
+          GitHub Actions native compilation and automated contract tests pass.
+          Minecraft 1.26.51 has a separate vanilla_1.26.52 compatibility warning;
+          it has **not** been patched by mislabeling vanilla assets.
+
+          **Pending acceptance:** two-player test of distances 10/20/30/60,
+          Mic OFF through proximity and SleepyPhone, repeated slider changes
+          without a Bedrock/Endstone crash. No stable-main release until
+          this acceptance test is observed.
+          EOF
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" out/* --clobber
+          else
+            gh release create "$TAG" out/*.whl out/*.mcaddon out/mumble-server-vc out/SHA256SUMS.txt \
+              --target "$GITHUB_SHA" \
+              --title "Sleepy Voice Chat MumbleHost v0.5.2 RC1" \
+              --notes-file RC_NOTES.md \
+              --prerelease
+          fi
