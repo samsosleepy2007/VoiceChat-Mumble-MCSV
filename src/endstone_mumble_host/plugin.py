@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+from concurrent.futures import ThreadPoolExecutor
 import math
 import threading
 import time
@@ -28,7 +30,7 @@ ATTENUATION_LEVELS: dict[int, str] = {
 
 class MumbleHost(Plugin):
     prefix = "MumbleHost"
-    version = "0.5.0"
+    version = "0.5.1"
     api_version = "0.11"
     description = "Unified MCSV Mumble server + Item Mic proximity + SleepyPhone call routing"
     authors = ["SamSoSleepy"]
@@ -57,6 +59,8 @@ class MumbleHost(Plugin):
         self._states: dict[str, PlayerState] = {}
         self._bindings: dict[str, dict[str, Any]] = {}
         self._calls: dict[str, dict[str, Any]] = {}
+        # Move persistent writes out of the Endstone world tick.
+        self._binding_writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="SleepyBindings")
         self._host: MumbleRuntimeHost | None = None
         self._state_sink: LocalStateSink | None = None
 
@@ -107,6 +111,10 @@ class MumbleHost(Plugin):
     def on_disable(self) -> None:
         try:
             self.server.scheduler.cancel_tasks(self)
+        except Exception:
+            pass
+        try:
+            self._binding_writer.shutdown(wait=False, cancel_futures=False)
         except Exception:
             pass
 
@@ -226,16 +234,21 @@ class MumbleHost(Plugin):
             )
 
     def _save_bindings(self) -> None:
+        # Snapshot while on main thread; write asynchronously in commit order.
+        payload = json.dumps(self._bindings, ensure_ascii=False, indent=2)
+        path = self.data_folder / "bindings.json"
         try:
-            path = self.data_folder / "bindings.json"
-            path.write_text(
-                json.dumps(self._bindings, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
+            self._binding_writer.submit(self._write_bindings_file, path, payload)
+        except RuntimeError as exc:
+            self.logger.warning(f"Could not queue range storage update: {exc}")
+
+    def _write_bindings_file(self, path: Any, payload: str) -> None:
+        try:
+            temporary = path.with_suffix(".json.tmp")
+            temporary.write_text(payload, encoding="utf-8")
+            os.replace(temporary, path)
         except Exception as exc:
-            self.logger.warning(
-                f"Could not save bindings.json: {type(exc).__name__}: {exc}"
-            )
+            self.logger.warning(f"Could not save bindings.json: {type(exc).__name__}: {exc}")
 
     def on_command(
         self,
@@ -334,6 +347,7 @@ class MumbleHost(Plugin):
         })
 
     def _tracking_tick(self) -> None:
+        tick_started = time.perf_counter()
         current_keys: set[str] = set()
 
         for player in self.server.online_players:
@@ -387,6 +401,12 @@ class MumbleHost(Plugin):
                 "tracked": len(self._states),
                 "ts": int(time.time() * 1000),
             })
+        elapsed_ms = (time.perf_counter() - tick_started) * 1000.0
+        if elapsed_ms > 35.0:
+            self.logger.warning(
+                f"TRACKING_SLOW duration_ms={elapsed_ms:.2f} "
+                f"players={len(current_keys)} calls={len(self._calls)}"
+            )
 
     def _send_full_snapshot(self) -> None:
         self._state_send({"type": "sync_begin", "count": len(self._states)})
@@ -559,6 +579,7 @@ class MumbleHost(Plugin):
                 except ValueError:
                     requested = 0
 
+                started_at = time.perf_counter()
                 if request_id and 1 <= requested <= maximum:
                     status = "ok"
                     if requested != current_range:
@@ -574,6 +595,14 @@ class MumbleHost(Plugin):
                         player,
                         f"vcmumble.vr.ack.{request_id}.{status}.{current_range}",
                     )
+                elapsed_ms = (time.perf_counter() - started_at) * 1000.0
+                self.logger.info(
+                    f"RANGE_ACK player={player.name} id={request_id} "
+                    f"requested={requested} actual={current_range} "
+                    f"status={status} duration_ms={elapsed_ms:.2f}"
+                )
+                if elapsed_ms > 35.0:
+                    self.logger.warning(f"RANGE_SLOW duration_ms={elapsed_ms:.2f}")
                 continue
 
             if tag.startswith("vcmumble.attn.sync."):
@@ -673,20 +702,12 @@ class MumbleHost(Plugin):
     def _voice_enabled_for(player: Player) -> bool:
         try:
             tags = set(player.scoreboard_tags)
-            has_on = "vcmumble.mic.on" in tags
-            has_off = "vcmumble.mic.off" in tags
-            if has_on:
-                if has_off:
-                    try:
-                        player.remove_scoreboard_tag("vcmumble.mic.off")
-                    except Exception:
-                        pass
-                return True
-            if has_off:
+            # Fail closed: OFF wins even if stale ON is still present.
+            if "vcmumble.mic.off" in tags:
                 return False
+            return "vcmumble.mic.on" in tags
         except Exception:
-            pass
-        return True
+            return False
 
     @staticmethod
     def _bounded_int(
