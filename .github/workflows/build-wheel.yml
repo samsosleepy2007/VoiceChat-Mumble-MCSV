@@ -1,82 +1,27 @@
-name: Build MumbleHost wheel
+name: Validate MumbleHost contract
 
 on:
   push:
-    branches:
-      - main
-      - experiment/unified-itemmic-proximity-v0.4.0
+    branches: [main, feature/sleepyvoice-range-micoff-v0.5.1, fix/mic-failclosed-range-20260930]
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# Building a distributable wheel without a freshly patched Mumble binary
+# is forbidden. Use build-proximity.yml for native compilation and packaging.
 jobs:
-  build:
+  validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      - name: Reuse verified VC proximity binary from v0.3.0
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p /tmp/mumblehost-v03 src/endstone_mumble_host/bin
-          gh release download v0.3.0 \
-            --repo "${{ github.repository }}" \
-            --pattern "endstone_mumble_host-0.3.0-py3-none-any.whl" \
-            --dir /tmp/mumblehost-v03
-          python - <<'PY'
-          import pathlib, zipfile
-          wheel = next(pathlib.Path("/tmp/mumblehost-v03").glob("*.whl"))
-          target = pathlib.Path("src/endstone_mumble_host/bin/mumble-server-vc")
-          with zipfile.ZipFile(wheel) as zf:
-              target.write_bytes(zf.read("endstone_mumble_host/bin/mumble-server-vc"))
-          target.chmod(0o755)
-          print(target, target.stat().st_size)
-          PY
-          test -s src/endstone_mumble_host/bin/mumble-server-vc
-
-      - name: Compile and test unified plugin
+      - name: Compile and test unified MumbleHost
         run: |
           python -m compileall -q src
           python tests/test_unified_contract.py
-
-      - name: Build wheel
-        run: |
-          python -m pip install --upgrade build
-          rm -rf dist build *.egg-info
-          python -m build --wheel
-
-      - name: Verify wheel contents
-        run: |
-          python - <<'PY'
-          import pathlib, zipfile
-          wheel = next(pathlib.Path("dist").glob("endstone_mumble_host-0.4.0-*.whl"))
-          with zipfile.ZipFile(wheel) as zf:
-              names = set(zf.namelist())
-          required = {
-              "endstone_mumble_host/plugin.py",
-              "endstone_mumble_host/host.py",
-              "endstone_mumble_host/local_state.py",
-              "endstone_mumble_host/listener.py",
-              "endstone_mumble_host/model.py",
-              "endstone_mumble_host/config.toml",
-              "endstone_mumble_host/bin/mumble-server-vc",
-          }
-          missing = required - names
-          assert not missing, missing
-          assert "endstone_mumble_host/bridge_relay.py" not in names
-          print(wheel)
-          PY
-          sha256sum dist/*.whl
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mumble-host-unified-v0.4.0
-          path: dist/*.whl
-          retention-days: 14
+          python tests/test_all_contexts_gate.py
+          node --input-type=module --check < staging/ItemMic-v2.18.2-BP/scripts/main.js

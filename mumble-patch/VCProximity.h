@@ -7,6 +7,9 @@ namespace VCProximity {
 
 void setEnabled(bool enabled);
 bool isEnabled();
+// Gate the sender before *any* audio context, including whispers and calls.
+// Missing, stale, disabled or explicitly muted player state is never allowed.
+bool canSpeak(const QString &speakerName);
 void setStaleTimeoutMs(qint64 timeoutMs);
 void updatePlayer(const QString &mumbleName,
                   const QString &dimension,
@@ -31,7 +34,7 @@ void clearCalls();
 int callCount();
 
 // Returns a per-listener volume factor in the range [0, 1]. When proximity is
-// disabled, stock Mumble routing is preserved with factor 1.0.
+// disabled, routing fails closed with factor 0.0.
 float attenuationFactor(const QString &speakerName, const QString &listenerName);
 
 // Returns true when Mumble should retain the receiver in the normal-speech

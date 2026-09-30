@@ -126,7 +126,8 @@ void VCStateFeed::applyDatagram(const QByteArray &payload) {
 
     int range = data.value(QStringLiteral("voiceRange")).toInt(30);
     int attenuationLevel = data.value(QStringLiteral("attenuationLevel")).toInt(2);
-    const bool voiceEnabled = data.value(QStringLiteral("voiceEnabled")).toBool(true);
+    // Never interpret absent or malformed mic state as enabled.
+    const bool voiceEnabled = data.value(QStringLiteral("voiceEnabled")).toBool(false);
 
     if (mumbleName.isEmpty() || dimension.isEmpty()
         || !qIsFinite(x) || !qIsFinite(y) || !qIsFinite(z)) {

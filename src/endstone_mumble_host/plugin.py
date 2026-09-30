@@ -30,7 +30,7 @@ ATTENUATION_LEVELS: dict[int, str] = {
 
 class MumbleHost(Plugin):
     prefix = "MumbleHost"
-    version = "0.5.1"
+    version = "0.5.2"
     api_version = "0.11"
     description = "Unified MCSV Mumble server + Item Mic proximity + SleepyPhone call routing"
     authors = ["SamSoSleepy"]
@@ -60,7 +60,7 @@ class MumbleHost(Plugin):
         self._bindings: dict[str, dict[str, Any]] = {}
         self._calls: dict[str, dict[str, Any]] = {}
         # Move persistent writes out of the Endstone world tick.
-        self._binding_writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="SleepyBindings")
+        self._binding_writer: ThreadPoolExecutor | None = None
         self._host: MumbleRuntimeHost | None = None
         self._state_sink: LocalStateSink | None = None
 
@@ -78,6 +78,12 @@ class MumbleHost(Plugin):
         self._last_host_running = False
 
     def on_enable(self) -> None:
+        # Endstone may enable the same instance after disable. A shutdown
+        # executor cannot accept new range writes; recreate it on enable.
+        if self._binding_writer is None:
+            self._binding_writer = ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="SleepyBindings"
+            )
         self.save_default_config()
         self._load_settings()
         self._load_bindings()
@@ -113,10 +119,15 @@ class MumbleHost(Plugin):
             self.server.scheduler.cancel_tasks(self)
         except Exception:
             pass
-        try:
-            self._binding_writer.shutdown(wait=False, cancel_futures=False)
-        except Exception:
-            pass
+        writer = self._binding_writer
+        self._binding_writer = None
+        if writer is not None:
+            try:
+                # Drain the small ordered binding queue before another
+                # instance/re-enable can replace bindings.json.
+                writer.shutdown(wait=True, cancel_futures=False)
+            except Exception as exc:
+                self.logger.warning(f"Could not finish binding writer: {exc}")
 
         sink = self._state_sink
         self._state_sink = None
@@ -237,8 +248,12 @@ class MumbleHost(Plugin):
         # Snapshot while on main thread; write asynchronously in commit order.
         payload = json.dumps(self._bindings, ensure_ascii=False, indent=2)
         path = self.data_folder / "bindings.json"
+        writer = self._binding_writer
+        if writer is None:
+            self.logger.warning("Binding update ignored: plugin is disabled")
+            return
         try:
-            self._binding_writer.submit(self._write_bindings_file, path, payload)
+            writer.submit(self._write_bindings_file, path, payload)
         except RuntimeError as exc:
             self.logger.warning(f"Could not queue range storage update: {exc}")
 
@@ -357,9 +372,28 @@ class MumbleHost(Plugin):
             addon_changed = self._process_addon_controls(player)
             state = self._snapshot_if_valid(player)
             if state is None:
+                # Never keep routing with a previously ON cached state when
+                # Minecraft can no longer provide a valid fresh snapshot.
+                previous = self._states.pop(key, None)
+                if previous is not None:
+                    self._state_send({
+                        "type": "player_leave",
+                        "name": previous.name,
+                        "xuid": previous.xuid,
+                        "uuid": previous.uuid,
+                        "mumbleName": previous.name,
+                    })
+                    self.logger.warning(
+                        f"STATE_INVALID player={player.name} action=fail-closed"
+                    )
                 continue
 
             previous = self._states.get(key)
+            if previous is None or state.voice_enabled != previous.voice_enabled:
+                self.logger.info(
+                    f"MIC_STATE player={state.name} "
+                    f"endstone={'ON' if state.voice_enabled else 'OFF'}"
+                )
             if (
                 addon_changed
                 or previous is None
@@ -571,7 +605,10 @@ class MumbleHost(Plugin):
             if tag.startswith("vcmumble.vr.request."):
                 payload = tag[len("vcmumble.vr.request."):]
                 request_id, separator, raw_value = payload.rpartition(".")
+                started_at = time.perf_counter()
+                self.logger.info(f"RANGE_BEGIN player={player.name} id={request_id}")
                 self._remove_player_tag(player, tag)
+                removed_at = time.perf_counter()
 
                 status = "error"
                 try:
@@ -579,7 +616,6 @@ class MumbleHost(Plugin):
                 except ValueError:
                     requested = 0
 
-                started_at = time.perf_counter()
                 if request_id and 1 <= requested <= maximum:
                     status = "ok"
                     if requested != current_range:
@@ -589,17 +625,24 @@ class MumbleHost(Plugin):
                         current_range = requested
                         changed = True
 
+                stored_at = time.perf_counter()
                 self._publish_addon_range_tags(player, current_range, maximum)
+                published_at = time.perf_counter()
                 if request_id:
                     self._add_player_tag(
                         player,
                         f"vcmumble.vr.ack.{request_id}.{status}.{current_range}",
                     )
-                elapsed_ms = (time.perf_counter() - started_at) * 1000.0
+                done_at = time.perf_counter()
+                elapsed_ms = (done_at - started_at) * 1000.0
                 self.logger.info(
                     f"RANGE_ACK player={player.name} id={request_id} "
                     f"requested={requested} actual={current_range} "
-                    f"status={status} duration_ms={elapsed_ms:.2f}"
+                    f"status={status} duration_ms={elapsed_ms:.2f} "
+                    f"remove_ms={(removed_at-started_at)*1000:.2f} "
+                    f"parse_store_ms={(stored_at-removed_at)*1000:.2f} "
+                    f"publish_ms={(published_at-stored_at)*1000:.2f} "
+                    f"ack_ms={(done_at-published_at)*1000:.2f}"
                 )
                 if elapsed_ms > 35.0:
                     self.logger.warning(f"RANGE_SLOW duration_ms={elapsed_ms:.2f}")

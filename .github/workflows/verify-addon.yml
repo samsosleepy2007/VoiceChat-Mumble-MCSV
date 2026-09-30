@@ -1,0 +1,56 @@
+name: Verify test Item Mic add-on
+
+on:
+  push:
+    branches: [fix/mic-failclosed-range-20260930]
+    paths:
+      - staging/SleepyVoiceChat-DDUI-hotfix-v2.18.2.mcaddon
+      - .github/workflows/verify-addon.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate both included packs and the slider crash hotfix
+        run: |
+          python3 - <<'PY'
+          import io
+          import json
+          import zipfile
+          from pathlib import Path
+
+          p = Path("staging/SleepyVoiceChat-DDUI-hotfix-v2.18.2.mcaddon")
+          with zipfile.ZipFile(p) as bundle:
+              members = [n for n in bundle.namelist() if n.endswith(".mcpack")]
+              assert len(members) == 2, members
+              packs = {}
+              for name in members:
+                  with zipfile.ZipFile(io.BytesIO(bundle.read(name))) as pack:
+                      manifest = json.loads(pack.read("manifest.json"))
+                      assert manifest["header"]["version"] == [2,18,2], name
+                      kind = "BP" if any(x["type"] == "script" for x in manifest["modules"]) else "RP"
+                      packs[kind] = manifest
+                      if kind == "BP":
+                          script = pack.read("scripts/main.js").decode("utf-8")
+                          assert "Native DDUI controls" in script
+                          assert 'if (mainPageVisible.getData() === true &&' in script
+                          assert "Deliberately disable unused periodic attenuation sync" in script
+                          assert "startDeferredRange(player, value, form)" in script
+              assert set(packs) == {"BP", "RP"}
+              rp = packs["RP"]["header"]
+              assert any(
+                  d.get("uuid") == rp["uuid"] and d.get("version") == rp["version"]
+                  for d in packs["BP"]["dependencies"]
+              )
+          print("Item Mic add-on: BP, RP and DDUI hotfix verified")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sleepyvoice-itemmic-v2.18.2-hotfix
+          path: staging/SleepyVoiceChat-DDUI-hotfix-v2.18.2.mcaddon
+          retention-days: 14

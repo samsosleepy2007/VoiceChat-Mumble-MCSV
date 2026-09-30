@@ -40,6 +40,19 @@ def patch_server_routing(murmur: pathlib.Path) -> None:
     segment_end = segment_start + end_match.start()
     segment = text[segment_start:segment_end]
 
+    # Receiver-level filters below cover normal-channel audio only. Check the
+    # *speaker* up front so whisper/alternate audio paths cannot bypass Mic OFF.
+    signature = re.search(
+        r"void\s+Server::processMsg\s*\([^)]*\)\s*\{", segment, re.DOTALL
+    )
+    if not signature:
+        raise RuntimeError("could not locate processMsg body for mic guard")
+    guard = (
+        "\n\tif (!VCProximity::canSpeak(u->qsName)) return; "
+        "// VC_PROXIMITY_ALL_CONTEXTS\n"
+    )
+    segment = segment[:signature.end()] + guard + segment[signature.end():]
+
     guards = list(re.finditer(r"if\s*\(pDst\)\s*\{", segment))
     if len(guards) != 2:
         raise RuntimeError(f"expected 2 regular listener guards; found {len(guards)}")

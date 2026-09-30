@@ -1,0 +1,36 @@
+name: Native Mic OFF regression
+
+on:
+  push:
+    branches: [fix/mic-failclosed-range-20260930]
+    paths:
+      - tests/test_native_mic_gate.cpp
+      - mumble-patch/VCProximity.cpp
+      - mumble-patch/VCProximity.h
+      - .github/workflows/test-native-mic-gate.yml
+  pull_request:
+    paths:
+      - tests/test_native_mic_gate.cpp
+      - mumble-patch/VCProximity.cpp
+      - mumble-patch/VCProximity.h
+      - .github/workflows/test-native-mic-gate.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Qt6Core toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install --no-install-recommends -y g++ pkg-config qt6-base-dev
+      - name: Compile actual C++ proximity gate and run mute regression
+        run: |
+          g++ -std=c++17 -O1 -fPIC -I mumble-patch \
+            tests/test_native_mic_gate.cpp mumble-patch/VCProximity.cpp \
+            -o /tmp/test-native-mic-gate $(pkg-config --cflags --libs Qt6Core)
+          /tmp/test-native-mic-gate

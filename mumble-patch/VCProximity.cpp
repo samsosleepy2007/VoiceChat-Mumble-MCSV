@@ -20,7 +20,7 @@ struct PlayerState {
     double y = 0.0;
     double z = 0.0;
     float rangeBlocks = 30.0F;
-    bool voiceEnabled = true;
+    bool voiceEnabled = false;
     int attenuationLevel = 2;
     qint64 updatedAtMs = 0;
 };
@@ -140,8 +140,18 @@ void updatePlayer(const QString &mumbleName,
     state.updatedAtMs = QDateTime::currentMSecsSinceEpoch();
 
     QWriteLocker locker(&g_lock);
+    const auto previous = g_players.constFind(key);
+    const bool micChanged = previous == g_players.constEnd()
+        || previous.value().voiceEnabled != state.voiceEnabled;
     g_players.insert(key, state);
     locker.unlock();
+
+    if (micChanged) {
+        qWarning().noquote()
+            << "[VC-PROX-MIC]"
+            << "mumble=" + mumbleName
+            << QString("mic=%1").arg(state.voiceEnabled ? QStringLiteral("on") : QStringLiteral("off"));
+    }
 
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     if (shouldLog(g_lastStateLogMs, now, 2000)) {
@@ -220,8 +230,22 @@ int callCount() {
     return g_calls.size();
 }
 
+bool canSpeak(const QString &speakerName) {
+    // This central guard is called *before* any normal/whisper/call routing.
+    // A cached client packet must not bypass the Minecraft Mic OFF state.
+    if (!isEnabled()) return false;
+    const QString key = keyFor(speakerName);
+    if (key.isEmpty()) return false;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    QReadLocker locker(&g_lock);
+    const auto state = g_players.constFind(key);
+    return state != g_players.constEnd()
+        && isFresh(state.value(), now)
+        && state.value().voiceEnabled;
+}
+
 float attenuationFactor(const QString &speakerName, const QString &listenerName) {
-    if (!isEnabled()) return 1.0F;
+    if (!isEnabled()) return 0.0F;
 
     const QString speakerKey = keyFor(speakerName);
     const QString listenerKey = keyFor(listenerName);
