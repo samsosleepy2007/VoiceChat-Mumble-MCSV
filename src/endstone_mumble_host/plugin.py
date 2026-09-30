@@ -389,6 +389,11 @@ class MumbleHost(Plugin):
                 continue
 
             previous = self._states.get(key)
+            if previous is None or state.voice_enabled != previous.voice_enabled:
+                self.logger.info(
+                    f"MIC_STATE player={state.name} "
+                    f"endstone={'ON' if state.voice_enabled else 'OFF'}"
+                )
             if (
                 addon_changed
                 or previous is None
