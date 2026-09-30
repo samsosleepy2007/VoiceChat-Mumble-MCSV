@@ -22,6 +22,7 @@ jobs:
         run: |
           python3 tests/test_unified_contract.py
           python3 tests/test_all_contexts_gate.py
+          node --input-type=module --check < staging/ItemMic-v2.18.2-BP/scripts/main.js
 
       - name: Install build dependencies
         run: |
@@ -70,7 +71,9 @@ jobs:
           file .build/mumble-build/mumble-server
           ldd .build/mumble-build/mumble-server
           strings .build/mumble-build/mumble-server | grep -F VC-PROX-FEED
-          strings .build/mumble-build/mumble-server | grep -F VCG1 || true\n          strings .build/mumble-build/mumble-server | grep -F call-speaker
+          strings .build/mumble-build/mumble-server | grep -F VCG1 || true
+          strings .build/mumble-build/mumble-server | grep -F call-speaker
+          strings .build/mumble-build/mumble-server | grep -F VC-PROX-MIC
 
       - name: Build proximity plugin wheel
         run: |
