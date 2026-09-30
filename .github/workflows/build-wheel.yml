@@ -12,7 +12,23 @@ permissions:
   contents: read
 
 jobs:
+  # PRs validate sources without packaging a stale v0.3 native binary.
+  # The current native 1.6.870 server is rebuilt by build-proximity.yml.
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check Endstone and all-context native mute gate
+        run: |
+          python -m compileall -q src
+          python tests/test_unified_contract.py
+          python tests/test_all_contexts_gate.py
+
   build:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
