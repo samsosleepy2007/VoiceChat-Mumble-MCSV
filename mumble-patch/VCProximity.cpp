@@ -140,8 +140,18 @@ void updatePlayer(const QString &mumbleName,
     state.updatedAtMs = QDateTime::currentMSecsSinceEpoch();
 
     QWriteLocker locker(&g_lock);
+    const auto previous = g_players.constFind(key);
+    const bool micChanged = previous == g_players.constEnd()
+        || previous.value().voiceEnabled != state.voiceEnabled;
     g_players.insert(key, state);
     locker.unlock();
+
+    if (micChanged) {
+        qWarning().noquote()
+            << "[VC-PROX-MIC]"
+            << "mumble=" + mumbleName
+            << QString("mic=%1").arg(state.voiceEnabled ? QStringLiteral("on") : QStringLiteral("off"));
+    }
 
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     if (shouldLog(g_lastStateLogMs, now, 2000)) {
