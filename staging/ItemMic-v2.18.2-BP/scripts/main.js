@@ -59,14 +59,14 @@ const ATTN_SYNC_PREFIX = "vcmumble.attn.sync.";
 
 const DEFAULT_VOICE_RANGE = 30;
 const DEFAULT_MAX_RANGE = 60;
-// Self-only Voice Range preview. Slider movement only updates this local visual;
-// it never sends a range request to Endstone. The ring follows the player at
-// waist height and expires 10 seconds after the most recent adjustment.
+// Self-only Voice Range preview restored from the proven v2.18.0 design.
+// Each static RP particle is a full ring billboard sized to radius * 2.
+// Slider movement only changes this local visual; it never sends Endstone traffic.
 const SAFE_PREVIEW_ENABLED = true;
-const SAFE_PREVIEW_PARTICLE = "vcmumble:voice_range_marker";
-const SAFE_PREVIEW_POINTS = 24;
+const VOICE_RANGE_PREVIEW_PREFIX = "vcmumble:voice_range_preview_";
+const SAFE_PREVIEW_MAX_RADIUS = 150;
 const SAFE_PREVIEW_DURATION_TICKS = 20 * 10;
-const SAFE_PREVIEW_RENDER_INTERVAL_TICKS = 10;
+const SAFE_PREVIEW_RENDER_INTERVAL_TICKS = 20;
 const SAFE_PREVIEW_POLL_TICKS = 5;
 const SAFE_PREVIEW_WAIST_OFFSET = 0.9;
 const activeRangePreviews = new Map();
@@ -2941,8 +2941,12 @@ function pollGlobalRangeRequests() {
       if (accepted >= 1 && player.getDynamicProperty(PROP_VOICE_RANGE) !== accepted) {
         player.setDynamicProperty(PROP_VOICE_RANGE, accepted);
       }
-      if (success) startVoiceRangeCooldown(player);
-      else rangeChangeCooldownUntil.set(player.id, system.currentTick + RANGE_RETRY_COOLDOWN_TICKS);
+      if (success) {
+        startVoiceRangeCooldown(player);
+        showVoiceRangePreview(player, accepted, "ack");
+      } else {
+        rangeChangeCooldownUntil.set(player.id, system.currentTick + RANGE_RETRY_COOLDOWN_TICKS);
+      }
       globalRangeResults.set(playerId, {
         id: pending.id, requested: pending.value, value: accepted,
         status: success ? "ok" : "rejected", tick: system.currentTick,
@@ -3114,7 +3118,11 @@ function applyMicModeFromUi(
   });
 }
 
-function renderVoiceRangePreview(player, radius) {
+function voiceRangePreviewParticleId(radius) {
+  return VOICE_RANGE_PREVIEW_PREFIX + String(radius).padStart(3, "0");
+}
+
+function renderVoiceRangePreview(player, radius, source = "active") {
   let center;
   try {
     center = player.location;
@@ -3122,37 +3130,51 @@ function renderVoiceRangePreview(player, radius) {
     return false;
   }
 
-  // Player.spawnParticle is private to this player. Re-render around the current
-  // location so the 360-degree ring follows them instead of remaining on the ground.
-  for (let i = 0; i < SAFE_PREVIEW_POINTS; i++) {
-    const angle = 2 * Math.PI * i / SAFE_PREVIEW_POINTS;
-    const point = {
-      x: center.x + radius * Math.cos(angle),
-      y: center.y + SAFE_PREVIEW_WAIST_OFFSET,
-      z: center.z + radius * Math.sin(angle),
-    };
-    try {
-      player.spawnParticle(SAFE_PREVIEW_PARTICLE, point);
-    } catch {}
+  const particleId = voiceRangePreviewParticleId(radius);
+  try {
+    // v2.18.0 proven design: one full-ring static billboard centered at waist.
+    // Do not restore the old Y+radius overhead copy.
+    player.spawnParticle(
+      particleId,
+      { x: center.x, y: center.y + SAFE_PREVIEW_WAIST_OFFSET, z: center.z }
+    );
+    return true;
+  } catch (e) {
+    console.warn(
+      `[SleepyVoice] PARTICLE_SPAWN_FAIL player=${player.name} id=${particleId} source=${source} error=${e}`
+    );
+    return false;
   }
-  return true;
 }
 
 function showVoiceRangePreview(player, rawRadius, source = "slider") {
   if (!SAFE_PREVIEW_ENABLED) return;
+
+  const requestedRadius = Math.floor(Number(rawRadius) || 1);
   const radius = Math.max(
     1,
-    Math.min(currentMaxRange(player), Math.floor(Number(rawRadius) || 1))
+    Math.min(
+      SAFE_PREVIEW_MAX_RADIUS,
+      currentMaxRange(player),
+      requestedRadius
+    )
   );
 
-  activeRangePreviews.set(player.id, {
+  const preview = {
     player,
     radius,
+    source,
     expiresAt: system.currentTick + SAFE_PREVIEW_DURATION_TICKS,
-  });
-  renderVoiceRangePreview(player, radius);
+  };
+  activeRangePreviews.set(player.id, preview);
+
+  if (!renderVoiceRangePreview(player, radius, source)) {
+    activeRangePreviews.delete(player.id);
+    return;
+  }
+
   console.info(
-    `[SleepyVoice] RANGE_PREVIEW player=${player.name} value=${radius} source=${source} ttl=10s y=waist`
+    `[SleepyVoice] RANGE_PREVIEW player=${player.name} value=${radius} source=${source} ttl=10s y=waist particle=${voiceRangePreviewParticleId(radius)}`
   );
 }
 
@@ -3164,7 +3186,7 @@ system.runInterval(() => {
       activeRangePreviews.delete(playerId);
       continue;
     }
-    if (!renderVoiceRangePreview(preview.player, preview.radius)) {
+    if (!renderVoiceRangePreview(preview.player, preview.radius, preview.source)) {
       activeRangePreviews.delete(playerId);
     }
   }
@@ -3308,6 +3330,7 @@ async function showSettings(player) {
     const submitQuickRange = (rawValue) => {
       const value = Math.floor(Number(rawValue));
       if (!Number.isFinite(value) || value < 1) return;
+      showVoiceRangePreview(player, value, "quick");
       return submitRange(value);
     };
 
@@ -3595,7 +3618,7 @@ async function showSettings(player) {
                 rangeConfirmText,
                 `สถานะ Endstone: §aยืนยันแล้ว — ${confirmedRange} บล็อก • คูลดาวน์ 30 วิ§r\n`
               );
-              system.runTimeout(() => showVoiceRangePreview(player, confirmedRange, "ack"), 5);
+              // Global ACK polling already starts the 10-second preview even after DDUI closes.
             } else {
               setObservableIfChanged(
                 rangeConfirmText,
@@ -3814,7 +3837,7 @@ world.afterEvents.playerLeave.subscribe((ev) => {
   states.delete(ev.playerId);
   globalRangePending.delete(ev.playerId);
   globalRangeResults.delete(ev.playerId);
-  lastRangePreviewTick.delete(ev.playerId);
+  activeRangePreviews.delete(ev.playerId);
   rangeChangeCooldownUntil.delete(ev.playerId);
   openSettingsPlayers.delete(ev.playerId);
   openSettingsForms.delete(ev.playerId);
@@ -3869,5 +3892,5 @@ system.runInterval(() => {
 }, 10);
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.18.3 Preview — self-only waist range ring + fail-closed Mic + safe range ACK"
+  "[VCMumbleItem/BP] Loaded v2.18.3 Preview — v2.18.0 static self-only waist ring + fail-closed Mic + safe range ACK"
 );
