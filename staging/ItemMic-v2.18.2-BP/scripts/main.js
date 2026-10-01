@@ -3869,5 +3869,5 @@ system.runInterval(() => {
 }, 10);
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.18.2 — throttled Mic tick + global range ACK/timeout + safe preview gate"
+  "[VCMumbleItem/BP] Loaded v2.18.3 Preview — self-only waist range ring + fail-closed Mic + safe range ACK"
 );
