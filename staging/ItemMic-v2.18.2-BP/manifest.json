@@ -1,13 +1,13 @@
 {
   "format_version": 2,
   "header": {
-    "name": "VC Mumble Item Mic BP v2.18.2",
+    "name": "VC Mumble Item Mic BP v2.18.3 Preview",
     "description": "VC Mumble Item Mic with SleepyPhone contacts, messaging, Favorites, inbox, and phone calling.",
     "uuid": "b6411120-cc4e-44a9-b28d-f43b10cafd86",
     "version": [
       2,
       18,
-      2
+      3
     ],
     "min_engine_version": [
       1,
@@ -22,7 +22,7 @@
       "version": [
         2,
         18,
-        2
+        3
       ]
     },
     {
@@ -32,7 +32,7 @@
       "version": [
         2,
         18,
-        2
+        3
       ],
       "entry": "scripts/main.js"
     }
@@ -51,7 +51,7 @@
       "version": [
         2,
         18,
-        2
+        3
       ]
     }
   ]
