@@ -59,14 +59,17 @@ const ATTN_SYNC_PREFIX = "vcmumble.attn.sync.";
 
 const DEFAULT_VOICE_RANGE = 30;
 const DEFAULT_MAX_RANGE = 60;
-// The old 1–150 giant-billboard preview is disabled after a native Level::tick
-// crash. A bounded, private dot-ring implementation is available behind a
-// feature flag, to re-enable only after range changes are stable in-game.
-const SAFE_PREVIEW_ENABLED = false;
+// Self-only Voice Range preview. Slider movement only updates this local visual;
+// it never sends a range request to Endstone. The ring follows the player at
+// waist height and expires 10 seconds after the most recent adjustment.
+const SAFE_PREVIEW_ENABLED = true;
 const SAFE_PREVIEW_PARTICLE = "vcmumble:voice_range_marker";
-const SAFE_PREVIEW_POINTS = 12;
-const SAFE_PREVIEW_COOLDOWN_TICKS = 20 * 30;
-const lastRangePreviewTick = new Map();
+const SAFE_PREVIEW_POINTS = 24;
+const SAFE_PREVIEW_DURATION_TICKS = 20 * 10;
+const SAFE_PREVIEW_RENDER_INTERVAL_TICKS = 10;
+const SAFE_PREVIEW_POLL_TICKS = 5;
+const SAFE_PREVIEW_WAIST_OFFSET = 0.9;
+const activeRangePreviews = new Map();
 const VOICE_RANGE_SLIDER_SETTLE_TICKS = 15;
 const VOICE_RANGE_CHANGE_COOLDOWN_TICKS = 20 * 30;
 const RANGE_REQUEST_TIMEOUT_TICKS = 20 * 4;
@@ -3111,28 +3114,61 @@ function applyMicModeFromUi(
   });
 }
 
-function showVoiceRangePreview(player, rawRadius) {
-  if (!SAFE_PREVIEW_ENABLED) return; // Disabled until native-crash isolation test passes.
-  const radius = Math.max(1, Math.min(currentMaxRange(player), Math.floor(Number(rawRadius) || 1)));
-  const lastTick = lastRangePreviewTick.get(player.id) ?? -SAFE_PREVIEW_COOLDOWN_TICKS;
-  if (system.currentTick - lastTick < SAFE_PREVIEW_COOLDOWN_TICKS) return;
-  lastRangePreviewTick.set(player.id, system.currentTick);
+function renderVoiceRangePreview(player, radius) {
   let center;
-  try { center = player.location; } catch { return; }
-  // No giant 120×120 particle billboards, no extra overhead marker at Y+radius.
-  // Bounded client-private markers dispatched in pairs across several ticks.
+  try {
+    center = player.location;
+  } catch {
+    return false;
+  }
+
+  // Player.spawnParticle is private to this player. Re-render around the current
+  // location so the 360-degree ring follows them instead of remaining on the ground.
   for (let i = 0; i < SAFE_PREVIEW_POINTS; i++) {
     const angle = 2 * Math.PI * i / SAFE_PREVIEW_POINTS;
     const point = {
       x: center.x + radius * Math.cos(angle),
-      y: center.y + 0.9,
+      y: center.y + SAFE_PREVIEW_WAIST_OFFSET,
       z: center.z + radius * Math.sin(angle),
     };
-    system.runTimeout(() => {
-      try { player.spawnParticle(SAFE_PREVIEW_PARTICLE, point); } catch {}
-    }, 1 + Math.floor(i / 2));
+    try {
+      player.spawnParticle(SAFE_PREVIEW_PARTICLE, point);
+    } catch {}
   }
+  return true;
 }
+
+function showVoiceRangePreview(player, rawRadius, source = "slider") {
+  if (!SAFE_PREVIEW_ENABLED) return;
+  const radius = Math.max(
+    1,
+    Math.min(currentMaxRange(player), Math.floor(Number(rawRadius) || 1))
+  );
+
+  activeRangePreviews.set(player.id, {
+    player,
+    radius,
+    expiresAt: system.currentTick + SAFE_PREVIEW_DURATION_TICKS,
+  });
+  renderVoiceRangePreview(player, radius);
+  console.info(
+    `[SleepyVoice] RANGE_PREVIEW player=${player.name} value=${radius} source=${source} ttl=10s y=waist`
+  );
+}
+
+system.runInterval(() => {
+  if (!SAFE_PREVIEW_ENABLED || activeRangePreviews.size === 0) return;
+
+  for (const [playerId, preview] of activeRangePreviews) {
+    if (system.currentTick >= preview.expiresAt) {
+      activeRangePreviews.delete(playerId);
+      continue;
+    }
+    if (!renderVoiceRangePreview(preview.player, preview.radius)) {
+      activeRangePreviews.delete(playerId);
+    }
+  }
+}, SAFE_PREVIEW_RENDER_INTERVAL_TICKS);
 
 function startDeferredRange(player, value, form) {
   try { form.close(); } catch {}
@@ -3154,6 +3190,7 @@ async function showSettings(player) {
 
   openSettingsPlayers.add(player.id);
   let refreshId;
+  let previewPollId;
 
   try {
     ensureMic(player);
@@ -3212,6 +3249,7 @@ async function showSettings(player) {
       initialCooldownSeconds <= 0 && !globalRangePending.has(player.id)
     );
     let lastSliderRange = Math.floor(rangeSlider.getData());
+    let lastPreviewSliderRange = lastSliderRange;
     let sliderCandidateRange = null;
     let sliderSettleDueTick = 0;
     let queuedSliderRange = null;
@@ -3420,6 +3458,31 @@ async function showSettings(player) {
 
     openSettingsForms.set(player.id, form);
 
+    // Read-only slider polling for the self-only preview. This intentionally
+    // performs no Observable writes and no Endstone/tag requests while dragging.
+    previewPollId = system.runInterval(() => {
+      try {
+        if (!SAFE_PREVIEW_ENABLED) return;
+        if (mainPageVisible.getData() !== true) return;
+        if (rangeControlsVisible.getData() !== true) return;
+        if (globalRangePending.has(player.id)) return;
+
+        const nextMax = Math.max(1, currentMaxRange(player));
+        const sliderValue = Math.max(
+          1,
+          Math.min(Math.floor(Number(rangeSlider.getData()) || 1), nextMax)
+        );
+        if (sliderValue === lastPreviewSliderRange) return;
+
+        lastPreviewSliderRange = sliderValue;
+        showVoiceRangePreview(player, sliderValue, "slider");
+      } catch (e) {
+        console.warn(
+          `[VCMumbleItem/BP] range preview poll failed player=${player.name}: ${e}`
+        );
+      }
+    }, SAFE_PREVIEW_POLL_TICKS);
+
     refreshId = system.runInterval(() => {
       try {
         // Native DDUI controls (especially the slider/visibility tree) must
@@ -3532,7 +3595,7 @@ async function showSettings(player) {
                 rangeConfirmText,
                 `สถานะ Endstone: §aยืนยันแล้ว — ${confirmedRange} บล็อก • คูลดาวน์ 30 วิ§r\n`
               );
-              system.runTimeout(() => showVoiceRangePreview(player, confirmedRange), 5);
+              system.runTimeout(() => showVoiceRangePreview(player, confirmedRange, "ack"), 5);
             } else {
               setObservableIfChanged(
                 rangeConfirmText,
@@ -3687,6 +3750,7 @@ async function showSettings(player) {
   } catch (e) {
     console.warn(`[VCMumbleItem/BP] DDUI form failed player=${player.name}: ${e}`);
   } finally {
+    if (previewPollId !== undefined) system.clearRun(previewPollId);
     if (refreshId !== undefined) system.clearRun(refreshId);
     openSettingsForms.delete(player.id);
     openSettingsPlayers.delete(player.id);
