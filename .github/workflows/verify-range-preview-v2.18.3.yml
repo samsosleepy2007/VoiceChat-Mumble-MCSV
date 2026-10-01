@@ -6,6 +6,7 @@ on:
       - feature/self-only-range-preview-v2.18.3
     paths:
       - staging/ItemMic-v2.18.2-BP/scripts/main.js
+      - staging/ItemMic-v2.18.2-BP/manifest.json
       - staging/SleepyVoiceChat-DDUI-hotfix-v2.18.2.mcaddon
       - .github/workflows/verify-range-preview-v2.18.3.yml
   workflow_dispatch:
@@ -36,6 +37,41 @@ jobs:
           out_dir.mkdir(exist_ok=True)
           out_bundle = out_dir / "SleepyVoiceChat-RangePreview-v2.18.3.mcaddon"
 
+          def static_ring_particle(radius):
+              # Exact v2.18.0 rendering model: one particles_alpha billboard,
+              # size = radius * 2, 1.2s lifetime, emitter_transform_xz.
+              return {
+                  "format_version": "1.10.0",
+                  "particle_effect": {
+                      "description": {
+                          "identifier": f"vcmumble:voice_range_preview_{radius:03d}",
+                          "basic_render_parameters": {
+                              "material": "particles_alpha",
+                              "texture": "textures/particle/vcmumble_voice_range_dot",
+                          },
+                      },
+                      "components": {
+                          "minecraft:emitter_rate_instant": {"num_particles": 1},
+                          "minecraft:emitter_lifetime_once": {"active_time": 0.01},
+                          "minecraft:emitter_shape_point": {
+                              "offset": [0, 0, 0],
+                              "direction": [0, 0, 0],
+                          },
+                          "minecraft:particle_lifetime_expression": {"max_lifetime": 1.2},
+                          "minecraft:particle_appearance_billboard": {
+                              "size": [float(radius * 2), float(radius * 2)],
+                              "facing_camera_mode": "emitter_transform_xz",
+                              "uv": {
+                                  "texture_width": 64,
+                                  "texture_height": 64,
+                                  "uv": [0, 0],
+                                  "uv_size": [64, 64],
+                              },
+                          },
+                      },
+                  },
+              }
+
           def repack_mcpack(raw, is_bp):
               source = zipfile.ZipFile(io.BytesIO(raw))
               out = io.BytesIO()
@@ -59,6 +95,17 @@ jobs:
                       elif is_bp and info.filename == "scripts/main.js":
                           data = src_script
                       target.writestr(info, data)
+
+                  if not is_bp:
+                      # Restore all static ring definitions from the v2.18.0 design.
+                      for radius in range(1, 151):
+                          name = f"particles/voice_range_preview_{radius:03d}.particle.json"
+                          data = json.dumps(
+                              static_ring_particle(radius),
+                              ensure_ascii=False,
+                              indent=2,
+                          ).encode("utf-8")
+                          target.writestr(name, data)
               return out.getvalue()
 
           with zipfile.ZipFile(src_bundle) as source:
@@ -101,16 +148,37 @@ jobs:
                       if kind == "BP":
                           script = pack.read("scripts/main.js").decode("utf-8")
                           assert "const SAFE_PREVIEW_ENABLED = true;" in script
+                          assert 'const VOICE_RANGE_PREVIEW_PREFIX = "vcmumble:voice_range_preview_";' in script
                           assert "const SAFE_PREVIEW_DURATION_TICKS = 20 * 10;" in script
+                          assert "const SAFE_PREVIEW_RENDER_INTERVAL_TICKS = 20;" in script
                           assert "const SAFE_PREVIEW_WAIST_OFFSET = 0.9;" in script
-                          assert 'player.spawnParticle(SAFE_PREVIEW_PARTICLE, point);' in script
+                          assert "player.spawnParticle(" in script
                           assert 'showVoiceRangePreview(player, sliderValue, "slider");' in script
-                          assert 'showVoiceRangePreview(player, confirmedRange, "ack")' in script
+                          assert 'showVoiceRangePreview(player, value, "quick");' in script
+                          assert 'showVoiceRangePreview(player, accepted, "ack");' in script
+                          assert "lastRangePreviewTick" not in script
                           start = script.index("// Read-only slider polling for the self-only preview.")
                           end = script.index("refreshId = system.runInterval", start)
                           preview_poll = script[start:end]
                           assert "requestVoiceRange(" not in preview_poll
                           assert ".setData(" not in preview_poll
+                      else:
+                          names = set(pack.namelist())
+                          static = sorted(
+                              n for n in names
+                              if n.startswith("particles/voice_range_preview_")
+                              and n.endswith(".particle.json")
+                          )
+                          assert len(static) == 150, len(static)
+                          p30 = json.loads(pack.read("particles/voice_range_preview_030.particle.json"))
+                          p60 = json.loads(pack.read("particles/voice_range_preview_060.particle.json"))
+                          c30 = p30["particle_effect"]["components"]
+                          c60 = p60["particle_effect"]["components"]
+                          assert c30["minecraft:particle_appearance_billboard"]["size"] == [60.0, 60.0]
+                          assert c60["minecraft:particle_appearance_billboard"]["size"] == [120.0, 120.0]
+                          assert c30["minecraft:particle_lifetime_expression"]["max_lifetime"] == 1.2
+                          assert c30["minecraft:particle_appearance_billboard"]["facing_camera_mode"] == "emitter_transform_xz"
+                          assert "textures/particle/vcmumble_voice_range_dot.png" in names
               assert set(packs) == {"BP", "RP"}
               rp = packs["RP"]["header"]
               assert any(
@@ -118,7 +186,7 @@ jobs:
                   for d in packs["BP"]["dependencies"]
               )
 
-          print("v2.18.3 self-only waist preview safety contract verified")
+          print("v2.18.3 static v2.18.0-style self-only waist preview verified")
           PY
 
       - uses: actions/upload-artifact@v4
