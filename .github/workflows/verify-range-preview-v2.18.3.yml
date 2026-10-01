@@ -1,0 +1,128 @@
+name: Verify self-only range preview v2.18.3
+
+on:
+  push:
+    branches:
+      - feature/self-only-range-preview-v2.18.3
+    paths:
+      - staging/ItemMic-v2.18.2-BP/scripts/main.js
+      - staging/SleepyVoiceChat-DDUI-hotfix-v2.18.2.mcaddon
+      - .github/workflows/verify-range-preview-v2.18.3.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-and-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check JavaScript syntax
+        run: node --check staging/ItemMic-v2.18.2-BP/scripts/main.js
+
+      - name: Build isolated v2.18.3 preview add-on
+        run: |
+          python3 - <<'PY'
+          import io
+          import json
+          import zipfile
+          from pathlib import Path
+
+          src_bundle = Path("staging/SleepyVoiceChat-DDUI-hotfix-v2.18.2.mcaddon")
+          src_script = Path("staging/ItemMic-v2.18.2-BP/scripts/main.js").read_bytes()
+          out_dir = Path("dist")
+          out_dir.mkdir(exist_ok=True)
+          out_bundle = out_dir / "SleepyVoiceChat-RangePreview-v2.18.3.mcaddon"
+
+          def repack_mcpack(raw, is_bp):
+              source = zipfile.ZipFile(io.BytesIO(raw))
+              out = io.BytesIO()
+              with source, zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as target:
+                  for info in source.infolist():
+                      data = source.read(info.filename)
+                      if info.filename == "manifest.json":
+                          manifest = json.loads(data)
+                          manifest["header"]["version"] = [2, 18, 3]
+                          manifest["header"]["name"] = manifest["header"]["name"].replace("v2.18.2", "v2.18.3 Preview")
+                          manifest["header"]["description"] = manifest["header"]["description"].replace(
+                              "v2.18.2", "v2.18.3 Preview"
+                          )
+                          for module in manifest.get("modules", []):
+                              module["version"] = [2, 18, 3]
+                          if is_bp:
+                              for dep in manifest.get("dependencies", []):
+                                  if dep.get("uuid") == "cb345edb-6e6c-49ac-9950-e2ae07bda214":
+                                      dep["version"] = [2, 18, 3]
+                          data = json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8")
+                      elif is_bp and info.filename == "scripts/main.js":
+                          data = src_script
+                      target.writestr(info, data)
+              return out.getvalue()
+
+          with zipfile.ZipFile(src_bundle) as source:
+              packs = [n for n in source.namelist() if n.endswith(".mcpack")]
+              assert len(packs) == 2, packs
+              with zipfile.ZipFile(out_bundle, "w", zipfile.ZIP_DEFLATED) as target:
+                  for name in packs:
+                      raw = source.read(name)
+                      with zipfile.ZipFile(io.BytesIO(raw)) as p:
+                          manifest = json.loads(p.read("manifest.json"))
+                          is_bp = any(m.get("type") == "script" for m in manifest.get("modules", []))
+                      new_name = (
+                          "SleepyVoiceChat-BP-v2.18.3-Preview.mcpack"
+                          if is_bp else "SleepyVoiceChat-RP-v2.18.3-Preview.mcpack"
+                      )
+                      target.writestr(new_name, repack_mcpack(raw, is_bp))
+
+          print(out_bundle)
+          PY
+
+      - name: Verify preview safety contract
+        run: |
+          python3 - <<'PY'
+          import io
+          import json
+          import zipfile
+          from pathlib import Path
+
+          p = Path("dist/SleepyVoiceChat-RangePreview-v2.18.3.mcaddon")
+          with zipfile.ZipFile(p) as bundle:
+              members = [n for n in bundle.namelist() if n.endswith(".mcpack")]
+              assert len(members) == 2, members
+              packs = {}
+              for name in members:
+                  with zipfile.ZipFile(io.BytesIO(bundle.read(name))) as pack:
+                      manifest = json.loads(pack.read("manifest.json"))
+                      assert manifest["header"]["version"] == [2, 18, 3], name
+                      kind = "BP" if any(x.get("type") == "script" for x in manifest["modules"]) else "RP"
+                      packs[kind] = manifest
+                      if kind == "BP":
+                          script = pack.read("scripts/main.js").decode("utf-8")
+                          assert "const SAFE_PREVIEW_ENABLED = true;" in script
+                          assert "const SAFE_PREVIEW_DURATION_TICKS = 20 * 10;" in script
+                          assert "const SAFE_PREVIEW_WAIST_OFFSET = 0.9;" in script
+                          assert 'player.spawnParticle(SAFE_PREVIEW_PARTICLE, point);' in script
+                          assert 'showVoiceRangePreview(player, sliderValue, "slider");' in script
+                          assert 'showVoiceRangePreview(player, confirmedRange, "ack")' in script
+                          start = script.index("// Read-only slider polling for the self-only preview.")
+                          end = script.index("refreshId = system.runInterval", start)
+                          preview_poll = script[start:end]
+                          assert "requestVoiceRange(" not in preview_poll
+                          assert ".setData(" not in preview_poll
+              assert set(packs) == {"BP", "RP"}
+              rp = packs["RP"]["header"]
+              assert any(
+                  d.get("uuid") == rp["uuid"] and d.get("version") == rp["version"]
+                  for d in packs["BP"]["dependencies"]
+              )
+
+          print("v2.18.3 self-only waist preview safety contract verified")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sleepyvoice-range-preview-v2.18.3
+          path: dist/SleepyVoiceChat-RangePreview-v2.18.3.mcaddon
+          retention-days: 14
