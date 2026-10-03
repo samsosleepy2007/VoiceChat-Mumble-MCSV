@@ -2,6 +2,18 @@
 
 **One-file Endstone plugin** สำหรับเปิด Mumble Server และทำ Minecraft Bedrock proximity voice บน MCSV โดยตรง
 
+## Item Mic v2.15.4 — Money items
+
+แอดออน: [VC_Mumble_ItemMic_v2.15.4_Money.mcaddon](release-assets/VC_Mumble_ItemMic_v2.15.4_Money.mcaddon)
+
+ใช้ v2.15.1 ที่อยู่ใน main เป็นฐาน เพิ่มโมเดล, texture และไอเทมเงินจาก Money ทั้ง 6 ค่า โดยใช้ ID ที่มีตัวอักษรนำหน้าค่าเงิน:
+`sleepy:money_1`, `sleepy:money_5`, `sleepy:money_10`, `sleepy:money_100`, `sleepy:money_500`, `sleepy:money_1000`.
+ไอเทมเงินอยู่หมวด Items ใน Creative inventory และถือมือหลักเท่านั้น (ปิด allow_off_hand และนำ wearable offhand ออก).
+ยังไม่มีระบบซื้อขายหรือยอดเงิน ไมค์และ SleepyPhone ใช้ระบบเดิม.
+
+Source BP/RP อยู่ใน `addon/`; สร้างไฟล์ด้วย `python tools/build_itemmic_addon.py`.
+ตรวจ JSON, ID/texture references และการปิดมือซ้ายแล้ว; ยังต้องทดสอบการแสดงโมเดลใน Minecraft จริง.
+
 ## v0.4.0 experimental topology
 
 ```text
@@ -93,3 +105,8 @@ default_attenuation_level = 3
 `experiment/unified-itemmic-proximity-v0.4.0`
 
 ยังไม่ merge เข้า `main` จนกว่าจะทดสอบกับผู้เล่นจริงครบ Mic ON/OFF, Range, distance attenuation และ DDUI.
+
+### v2.15.4 fixes
+
+Money items use format 1.26.0 with armor/enchantable/durability/repairable removed.
+Mic flag reassertion checks getItem before accessing a container slot and handles unloaded slots.

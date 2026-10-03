@@ -1,0 +1,33 @@
+{
+  "resource_pack_name": "vc_mumble_mic_icons",
+  "texture_name": "atlas.items",
+  "texture_data": {
+    "voicecraft_mic_off": {
+      "textures": "textures/items/icon_mic_off"
+    },
+    "voicecraft_mic_on": {
+      "textures": "textures/items/icon_mic_on"
+    },
+    "voicecraft_phone": {
+      "textures": "textures/items/icon_phone"
+    },
+    "1": {
+      "textures": "textures/items/1"
+    },
+    "5": {
+      "textures": "textures/items/5"
+    },
+    "10": {
+      "textures": "textures/items/10"
+    },
+    "100": {
+      "textures": "textures/items/100"
+    },
+    "500": {
+      "textures": "textures/items/500"
+    },
+    "1000": {
+      "textures": "textures/items/1000"
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "format_version": "1.10.0",
+  "minecraft:attachable": {
+    "description": {
+      "identifier": "voicecraft:mic_hold",
+      "materials": {
+        "default": "entity_alphatest"
+      },
+      "textures": {
+        "default": "textures/entity/voicecraft_mic_invisible"
+      },
+      "geometry": {
+        "default": "geometry.voicecraft.mic_invisible"
+      },
+      "render_controllers": [
+        "controller.render.voicecraft_mic_invisible"
+      ]
+    }
+  }
+}

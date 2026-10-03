@@ -1,0 +1,29 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "VC Mumble Mic Icons RP v2.15.4",
+    "description": "Mic icons/models, SleepyPhone equipment model/icon, and private Voice Range preview resources for VC Mumble Item Mic v2.15.1. Includes six Money items (main hand only).",
+    "uuid": "cb345edb-6e6c-49ac-9950-e2ae07bda214",
+    "version": [
+      2,
+      15,
+      4
+    ],
+    "min_engine_version": [
+      1,
+      26,
+      40
+    ]
+  },
+  "modules": [
+    {
+      "type": "resources",
+      "uuid": "8fe8f823-ec65-4cb3-9c65-310932410e59",
+      "version": [
+        2,
+        15,
+        4
+      ]
+    }
+  ]
+}

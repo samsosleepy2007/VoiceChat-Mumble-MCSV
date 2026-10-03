@@ -1,0 +1,41 @@
+{
+  "format_version": "1.10.0",
+  "minecraft:attachable": {
+    "description": {
+      "identifier": "sleepy:money_5",
+      "materials": {
+        "default": "armor",
+        "enchanted": "armor_enchanted"
+      },
+      "textures": {
+        "default": "textures/models/armor/5",
+        "enchanted": "textures/misc/enchanted_item_glint"
+      },
+      "geometry": {
+        "default": "geometry.5"
+      },
+      "scripts": {
+        "parent_setup": "variable.helmet_layer_visible = 0.0;",
+        "animate": [
+          "smooth_anim"
+        ],
+        "initialize": [
+          "variable.sy_DtCSFseU = query.target_y_rotation;",
+          "variable.sx_lCXMmrGS = query.target_x_rotation;",
+          "variable.sys_AbaBpQiZ = 0;"
+        ],
+        "pre_animation": [
+          "variable.sy_DtCSFseU = math.lerp(variable.sy_DtCSFseU, query.target_y_rotation, query.delta_time * 6.00);",
+          "variable.sx_lCXMmrGS = math.lerp(variable.sx_lCXMmrGS, query.target_x_rotation, query.delta_time * 6.00);",
+          "variable.sys_AbaBpQiZ = math.lerp(variable.sys_AbaBpQiZ, query.yaw_speed, query.delta_time * 15);"
+        ]
+      },
+      "render_controllers": [
+        "controller.render.armor"
+      ],
+      "animations": {
+        "smooth_anim": "animation.rqAyyMQHEVWqiXn"
+      }
+    }
+  }
+}

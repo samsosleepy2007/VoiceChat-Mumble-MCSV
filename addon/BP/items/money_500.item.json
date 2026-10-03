@@ -1,0 +1,19 @@
+{
+  "format_version": "1.26.0",
+  "minecraft:item": {
+    "description": {
+      "identifier": "sleepy:money_500",
+      "menu_category": {
+        "category": "items"
+      }
+    },
+    "components": {
+      "minecraft:icon": "500",
+      "minecraft:display_name": {
+        "value": "500"
+      },
+      "minecraft:allow_off_hand": false,
+      "minecraft:max_stack_size": 1
+    }
+  }
+}

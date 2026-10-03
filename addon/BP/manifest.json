@@ -1,0 +1,58 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "VC Mumble Item Mic BP v2.15.4",
+    "description": "VC Mumble Item Mic with SleepyPhone contacts, Favorites, messaging, inbox, and DDUI. Includes six Money items (main hand only).",
+    "uuid": "b6411120-cc4e-44a9-b28d-f43b10cafd86",
+    "version": [
+      2,
+      15,
+      4
+    ],
+    "min_engine_version": [
+      1,
+      26,
+      40
+    ]
+  },
+  "modules": [
+    {
+      "type": "data",
+      "uuid": "8b404c2b-0f4e-4dbe-bebd-001ffcc6055f",
+      "version": [
+        2,
+        15,
+        4
+      ]
+    },
+    {
+      "type": "script",
+      "language": "javascript",
+      "uuid": "83cef7ea-2abf-44ae-bca3-f7a711f89d2a",
+      "version": [
+        2,
+        15,
+        4
+      ],
+      "entry": "scripts/main.js"
+    }
+  ],
+  "dependencies": [
+    {
+      "module_name": "@minecraft/server",
+      "version": "2.9.0"
+    },
+    {
+      "module_name": "@minecraft/server-ui",
+      "version": "2.1.0"
+    },
+    {
+      "uuid": "cb345edb-6e6c-49ac-9950-e2ae07bda214",
+      "version": [
+        2,
+        15,
+        4
+      ]
+    }
+  ]
+}
