@@ -799,12 +799,21 @@ function notifyPhoneRecipient(phoneId, message) {
   for (const target of world.getAllPlayers()) {
     if (!playerHasPhoneId(target, phoneId)) continue;
     try {
-      target.sendMessage(`§b[ SleepyPhone ]§r : มีข้อความจาก ${senderNumber} ${senderName}`);
+      phoneChat(target, `มีข้อความจาก ${senderNumber} ${senderName}`, "warning");
     } catch {}
   }
 }
 
 let phoneCallSequence = 0;
+function phoneChat(player, message, kind = "normal") {
+  const color = kind === "error" ? "§c" : kind === "warning" ? "§e" : "§b";
+  player.sendMessage(`${color}[ SleepyPhone ] ${message}§r`);
+}
+function incomingCallIdentity(recipientPhoneId, callerPhoneId, callerNumber, anonymous) {
+  if (anonymous) return ANONYMOUS_NUMBER;
+  const saved = readPhoneContacts(recipientPhoneId).find(c => c.phoneId === callerPhoneId);
+  return saved?.name ? `${saved.name} (${callerNumber})` : callerNumber;
+}
 const phoneCalls = new Map();
 const playerPhoneCalls = new Map();
 const PHONE_CALL_TAG = "vcmumble.call.active.";
@@ -830,7 +839,7 @@ function clearPhoneCallTags(player) {
   if (!player) return;
   for (const tag of player.getTags()) if (tag.startsWith(PHONE_CALL_TAG)) player.removeTag(tag);
 }
-function endPhoneCall(call, reason = "จบการโทรแล้ว") {
+function endPhoneCall(call, reason = "วางสายแล้ว", kind = "normal") {
   if (!call || !phoneCalls.has(call.id)) return;
   phoneCalls.delete(call.id);
   for (const id of [call.a, call.b]) {
@@ -839,7 +848,7 @@ function endPhoneCall(call, reason = "จบการโทรแล้ว") {
     if (participant) {
       try { clearPhoneCallTags(participant); } catch {}
       try { leavePhoneVoice(participant); } catch {}
-      try { participant.sendMessage(`[ SleepyPhone ] ${reason}`); } catch {}
+      try { phoneChat(participant, reason, kind); } catch {}
     }
   }
 }
@@ -857,20 +866,19 @@ function startPhoneCall(player, ownProfile, targetProfile, anonymous) {
   phoneCalls.set(call.id, call);
   playerPhoneCalls.set(call.a, call.id); playerPhoneCalls.set(call.b, call.id);
   try { enterPhoneVoice(player); }
-  catch { endPhoneCall(call, "เปิดไมค์สำหรับการโทรไม่สำเร็จ"); return "เปิดไมค์สำหรับการโทรไม่สำเร็จ"; }
-  player.sendMessage(`[ SleepyPhone ] กำลังโทรไปที่เบอร์ ${targetProfile.number} ใช้โทรศัพท์เพื่อดูสถานะ`);
-  const contact = readPhoneContacts(targetProfile.id).find(c => c.phoneId === ownProfile.id);
-  const identity = anonymous ? "ไม่ระบุตัวตน" : `${contact?.name || ownProfile.icName} (${ownProfile.number})`;
-  target.sendMessage(`[ SleepyPhone ] มีสายเข้าจาก ${identity} ใช้โทรศัพท์เพื่อรับหรือตัดสาย`);
+  catch { endPhoneCall(call, "เปิดไมค์สำหรับการโทรไม่สำเร็จ", "error"); return "เปิดไมค์สำหรับการโทรไม่สำเร็จ"; }
+  phoneChat(player, `กำลังโทรไปที่เบอร์ ${targetProfile.number} ใช้โทรศัพท์เพื่อดูสถานะ`);
+  const identity = incomingCallIdentity(targetProfile.id, ownProfile.id, ownProfile.number, anonymous);
+  phoneChat(target, `มีสายเข้าจาก ${identity} ใช้โทรศัพท์เพื่อรับหรือตัดสาย`, "warning");
   return "";
 }
 function acceptPhoneCall(player) {
   const call = phoneCallFor(player);
   if (!call || call.b !== player.id || call.state !== "ringing") return;
   const a = callPlayer(call.a), b = callPlayer(call.b);
-  if (!a || !b || system.currentTick >= call.expires) { endPhoneCall(call, "สายหมดเวลาแล้ว"); return; }
+  if (!a || !b || system.currentTick >= call.expires) { endPhoneCall(call, "สายหมดเวลาแล้ว", "error"); return; }
   if (heldPhoneData(a)?.id !== call.phoneA || heldPhoneData(b)?.id !== call.phoneB) {
-    endPhoneCall(call, "สายหลุด เพราะไม่ได้ถือโทรศัพท์ไว้"); return;
+    endPhoneCall(call, "สายหลุด เพราะไม่ได้ถือโทรศัพท์ไว้", "error"); return;
   }
   try {
     enterPhoneVoice(b);
@@ -878,9 +886,9 @@ function acceptPhoneCall(player) {
     a.addTag(`${PHONE_CALL_TAG}${call.id}.a.0`);
     b.addTag(`${PHONE_CALL_TAG}${call.id}.b.0`);
     call.state = "active";
-    a.sendMessage("[ SleepyPhone ] รับสายแล้ว คุยกันได้โดยไม่จำกัดระยะ");
-    b.sendMessage("[ SleepyPhone ] รับสายแล้ว คุยกันได้โดยไม่จำกัดระยะ");
-  } catch { endPhoneCall(call, "เชื่อมต่อสายไม่สำเร็จ"); }
+    phoneChat(a, "รับสายแล้ว คุยกันได้โดยไม่จำกัดระยะ");
+    phoneChat(b, "รับสายแล้ว คุยกันได้โดยไม่จำกัดระยะ");
+  } catch { endPhoneCall(call, "เชื่อมต่อสายไม่สำเร็จ", "error"); }
 }
 function togglePhoneSpeaker(player) {
   const call = phoneCallFor(player);
@@ -893,17 +901,17 @@ function togglePhoneSpeaker(player) {
   player.addTag(`${PHONE_CALL_TAG}${call.id}.${role}.${enabled ? 1 : 0}`);
   player.removeTag(`${PHONE_CALL_TAG}${call.id}.${role}.${enabled ? 0 : 1}`);
   call[field] = enabled;
-  player.sendMessage(`[ SleepyPhone ] ลำโพง: ${enabled ? "เปิด" : "ปิด"}`);
+  phoneChat(player, `ลำโพง: ${enabled ? "เปิด" : "ปิด"}`);
   return enabled;
 }
 system.runInterval(() => {
   for (const call of phoneCalls.values()) {
     const a = callPlayer(call.a), b = callPlayer(call.b);
-    if (!a || !b) { endPhoneCall(call, "ปลายสายออกจากเซิร์ฟเวอร์แล้ว"); continue; }
-    if (call.state === "ringing" && system.currentTick >= call.expires) { endPhoneCall(call, "ไม่มีผู้รับสาย"); continue; }
+    if (!a || !b) { endPhoneCall(call, "ปลายสายออกจากเซิร์ฟเวอร์แล้ว", "error"); continue; }
+    if (call.state === "ringing" && system.currentTick >= call.expires) { endPhoneCall(call, "ไม่มีผู้รับสาย", "warning"); continue; }
     if (heldPhoneData(a)?.id !== call.phoneA ||
         (call.state === "active" && heldPhoneData(b)?.id !== call.phoneB)) {
-      endPhoneCall(call, "สายหลุด เพราะไม่ได้ถือโทรศัพท์ไว้");
+      endPhoneCall(call, "สายหลุด เพราะไม่ได้ถือโทรศัพท์ไว้", "error");
     }
   }
 }, 10);
@@ -914,13 +922,13 @@ async function showPhone(player) {
   if (!player) return;
   if (openPhonePlayers.has(player.id)) return;
   if (openSettingsPlayers.has(player.id)) {
-    player.sendMessage("§e[SleepyPhone] กรุณาปิดหน้าตั้งค่า Mic ก่อน§r");
+    phoneChat(player, "กรุณาปิดหน้าตั้งค่า Mic ก่อน", "warning");
     return;
   }
 
   const initial = resolvePhoneProfile(player);
   if (!initial.slot) {
-    player.sendMessage("§c[SleepyPhone] ไม่พบโทรศัพท์ที่กำลังใช้งาน§r");
+    phoneChat(player, "ไม่พบโทรศัพท์ที่กำลังใช้งาน", "error");
     return;
   }
 
@@ -1015,7 +1023,7 @@ async function showPhone(player) {
       const call = phoneCallFor(player);
       if (!call) { callStatusText.setData("ไม่มีสายอยู่ในขณะนี้"); showPage("callMethod"); return; }
       const incoming = call.b === player.id;
-      const identity = incoming ? (call.anonymous ? "ไม่ระบุตัวตน" : `${call.callerName} (${call.callerNumber})`) : `${call.targetName} (${call.targetNumber})`;
+      const identity = incoming ? incomingCallIdentity(call.phoneB, call.phoneA, call.callerNumber, call.anonymous) : `${call.targetName} (${call.targetNumber})`;
       callStatusText.setData(`\n${call.state === "active" ? "กำลังคุยสาย" : incoming ? "มีสายเข้า" : "กำลังรอรับสาย"}\n\n${identity}\n`);
       callAcceptVisible.setData(incoming && call.state === "ringing");
       callSpeakerLabel.setData(`ลำโพง: ${(incoming ? call.speakerB : call.speakerA) ? "เปิด" : "ปิด"}`);
@@ -1255,7 +1263,10 @@ async function showPhone(player) {
       showPage("contacts");
     };
 
+    let addContactBackPage = "contacts";
+    const returnFromAddContact = () => { refreshContacts(); showPage(addContactBackPage); };
     const openAddContact = () => {
+      addContactBackPage = currentPhonePage === "callContacts" ? "callContacts" : "contacts";
       addContactNameInput.setData("");
       addContactNumberInput.setData("");
       addContactStatus.setData("\nสถานะ: รอข้อมูล\n");
@@ -1379,7 +1390,7 @@ async function showPhone(player) {
 
           system.runTimeout(() => {
             addContactBusy = false;
-            showPage("contacts");
+            returnFromAddContact();
           }, 20);
         } catch (e) {
           console.warn(`[VCMumbleItem/BP] add contact failed player=${player.name}: ${e}`);
@@ -1639,6 +1650,7 @@ async function showPhone(player) {
       .button("โทร", dialNumber, { visible: pages.callNumber })
       .button("ย้อนกลับ", openCallMethod, { visible: pages.callNumber })
       .header("โทรด้วยรายชื่อ", { visible: pages.callContacts })
+      .button("เพิ่มรายชื่อ", openAddContact, { visible: pages.callContacts })
       .label(contactEmptyText, { visible: pages.callContacts })
       .button(callAnonymousLabel, toggleCallAnonymous, { visible: pages.callContacts })
       .label(callStatusText, { visible: pages.callContacts });
@@ -1711,7 +1723,7 @@ async function showPhone(player) {
       })
       .label(addContactStatus, { visible: pages.addContact })
       .button("เพิ่มรายชื่อ", submitAddContact, { visible: pages.addContact })
-      .button("ย้อนกลับ", openContacts, { visible: pages.addContact })
+      .button("ย้อนกลับ", returnFromAddContact, { visible: pages.addContact })
 
       .header("ข้อมูลรายชื่อ", { visible: pages.contactDetail })
       .label(contactDetailText, { visible: pages.contactDetail })
@@ -2551,7 +2563,7 @@ world.afterEvents.playerSpawn.subscribe((ev) => {
 });
 
 world.afterEvents.playerLeave.subscribe((ev) => {
-  endPhoneCall(phoneCalls.get(playerPhoneCalls.get(ev.playerId)), "ปลายสายออกจากเซิร์ฟเวอร์แล้ว");
+  endPhoneCall(phoneCalls.get(playerPhoneCalls.get(ev.playerId)), "ปลายสายออกจากเซิร์ฟเวอร์แล้ว", "error");
   states.delete(ev.playerId);
   const refreshJob = settingsRefreshJobs.get(ev.playerId);
   if (refreshJob !== undefined) system.clearRun(refreshJob);
@@ -2591,5 +2603,5 @@ system.runInterval(() => {
 }, 100);
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.15.9 — Mic DDUI open guard + slider confirmation"
+  "[VCMumbleItem/BP] Loaded v2.15.10 — SleepyPhone call Mic + contacts + chat colors"
 );
