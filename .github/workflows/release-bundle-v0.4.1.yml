@@ -1,0 +1,48 @@
+name: Publish VoiceChat bundle v0.4.1
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/release-bundle-v0.4.1.yml]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare verified release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir out
+          gh release download v0.4.0 --repo "$GITHUB_REPOSITORY" --pattern endstone_mumble_host-0.4.0-py3-none-any.whl --dir out
+          echo "09053a7bcb4c19c017a006c664c53edcb69dae7201d2de3517c358a62f756983  out/endstone_mumble_host-0.4.0-py3-none-any.whl" | sha256sum -c -
+          cp release-assets/VC_Mumble_ItemMic_v2.15.4_Money.mcaddon out/
+          cp apps/vc-mumla/apk/VC-Mumla-v0.5-aec-debug.apk out/
+          unzip -t out/VC_Mumble_ItemMic_v2.15.4_Money.mcaddon
+          unzip -t out/VC-Mumla-v0.5-aec-debug.apk > /dev/null
+          cd out
+          sha256sum *.whl *.mcaddon *.apk > SHA256SUMS.txt
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > /tmp/release-notes.md <<'NOTES'
+          ## อัปเดตในชุดนี้
+          - เพิ่มไอเทมเงิน 6 ค่า: 1, 5, 10, 100, 500 และ 1000 ในหมวด Items และปิดการถือมือซ้าย
+          - แก้ ID เงินเป็น sleepy:money_1 ถึง sleepy:money_1000 และนำ component minecraft:armor ที่เลิกใช้ออกจากเงินและโทรศัพท์
+          - แก้การอ่านช่องไอเทมว่างของระบบไมค์เพื่อป้องกัน InvalidContainerSlotError
+          - รวม texture เงิน 6 ไฟล์และ geometry ธนบัตร 3 ไฟล์ที่ผู้ใช้ปรับล่าสุด
+          - นำ source code VC Mumla/Humla พร้อมแพตช์ VC และข้อมูลต้นทางมาไว้ใน apps/vc-mumla
+          - แนบแอป Android VC Mumla v0.5 AEC (debug APK) สำหรับผู้เล่น โดยเป็น APK เดิมจากต้นทาง ไม่ได้ build แอปเวอร์ชันใหม่
+          
+          ## ไฟล์ดาวน์โหลด
+          - endstone_mumble_host-0.4.0-py3-none-any.whl — ปลั๊กอิน Endstone พร้อม Mumble Server ใช้รุ่นเดิม ไม่มีการเปลี่ยนโค้ดปลั๊กอินในชุดอัปเดตนี้
+          - VC_Mumble_ItemMic_v2.15.4_Money.mcaddon — แอดออน VoiceChat / SleepyPhone พร้อมไอเทมเงินและภาพล่าสุด
+          - VC-Mumla-v0.5-aec-debug.apk — แอป Android สำหรับผู้เล่น
+          - SHA256SUMS.txt — checksum ของไฟล์แนบ
+          
+          ติดตั้ง wheel ในโฟลเดอร์ plugins ของ Endstone เปิดใช้ BP/RP ของแอดออน และติดตั้ง APK บนอุปกรณ์ Android ของผู้เล่น
+          
+          NOTES
+          gh release create v0.4.1 out/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Sleepy Voice Chat v0.4.1 — Money & VC Mumla" --notes-file /tmp/release-notes.md --latest
