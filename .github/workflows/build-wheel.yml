@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - experiment/unified-itemmic-proximity-v0.5.4
+      - experiment/unified-itemmic-proximity-v0.5.5
   pull_request:
   workflow_dispatch:
 
@@ -37,7 +37,7 @@ jobs:
         run: |
           python - <<'PY'
           import pathlib, zipfile
-          wheel = next(pathlib.Path("dist").glob("endstone_mumble_host-0.5.4-*.whl"))
+          wheel = next(pathlib.Path("dist").glob("endstone_mumble_host-0.5.5-*.whl"))
           with zipfile.ZipFile(wheel) as zf:
               names = set(zf.namelist())
           required = {
@@ -58,6 +58,6 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: mumble-host-unified-v0.5.4
+          name: mumble-host-unified-v0.5.5
           path: dist/*.whl
           retention-days: 14

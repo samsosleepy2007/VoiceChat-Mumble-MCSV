@@ -1,0 +1,31 @@
+name: Test SleepyPhone 4-block Mic
+on:
+  push:
+    branches: [feature/phone-mic-4-block-test]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install --no-install-recommends -y g++ pkg-config qt6-base-dev
+      - run: |
+          node --check addon/BP/scripts/main.js
+          node tests/test_phone_calls.mjs
+          node tests/test_contacts_ui.mjs
+          python3 tests/test_phone_voice.py
+          python3 tests/test_unified_contract.py
+          g++ -std=c++17 -fPIC tests/test_call_routing.cpp mumble-patch/VCProximity.cpp -I mumble-patch $(pkg-config --cflags --libs Qt6Core) -o /tmp/test-call-routing
+          /tmp/test-call-routing
+      - run: |
+          python3 -m pip install build
+          python3 -m build --wheel
+          python3 tools/build_itemmic_addon.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sleepyphone-4-block-test
+          path: |
+            dist/*.whl
+            release-assets/VC_Mumble_ItemMic_v2.15.10_MicFix.mcaddon

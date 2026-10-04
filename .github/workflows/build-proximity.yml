@@ -7,7 +7,7 @@ permissions:
 on:
   workflow_dispatch:
   push:
-    branches: [main, feature/mcsv-proximity-v0.3]
+    branches: [main, feature/mcsv-proximity-v0.3, feature/phone-mic-4-block-test]
 
 jobs:
   build:
@@ -83,7 +83,7 @@ jobs:
           rm -rf dist build *.egg-info
           python3 -m build --wheel
           python3 tools/build_itemmic_addon.py
-          cp release-assets/VC_Mumble_ItemMic_v2.15.8_MicFix.mcaddon out/
+          cp release-assets/VC_Mumble_ItemMic_v2.15.10_MicFix.mcaddon out/
           cp .build/mumble-build/mumble-server out/mumble-server-vc
           cp dist/*.whl out/
           chmod +x out/mumble-server-vc
@@ -92,7 +92,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: sleepyphone-calls-v0.5.4
+          name: sleepyphone-calls-v0.5.5
           path: out/
           retention-days: 14
 

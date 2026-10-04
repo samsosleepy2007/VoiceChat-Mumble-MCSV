@@ -15,6 +15,7 @@ class PlayerState:
     yaw: float
     pitch: float
     voice_enabled: bool = False
+    phone_voice_enabled: bool = False
 
     def changed_from(
         self,
@@ -25,6 +26,7 @@ class PlayerState:
         return (
             self.name != other.name
             or self.voice_enabled != other.voice_enabled
+            or self.phone_voice_enabled != other.phone_voice_enabled
             or self.dimension != other.dimension
             or abs(self.x - other.x) >= position_epsilon
             or abs(self.y - other.y) >= position_epsilon
