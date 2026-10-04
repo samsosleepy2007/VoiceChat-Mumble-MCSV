@@ -80,5 +80,5 @@ assert.equal(players[0].messages.at(-1), '§b[ SleepyPhone ] ปกติ§r');
 assert.equal(players[1].messages.at(-1), '§c[ SleepyPhone ] ขัดข้อง§r');
 run('startPhoneCall(a, pa, pb, false); endPhoneCall(phoneCallFor(a))');
 assert.equal(players[0].messages.at(-1), '§b[ SleepyPhone ] วางสายแล้ว§r');
-assert.ok(source.includes('.button("เพิ่มรายชื่อ", openAddContact, { visible: pages.callContacts })'));
+assert.ok(source.includes('.button("เพิ่มรายชื่อ", openAddContact, { visible: pages.contactsApp })'));
 console.log('PASS: saved-name privacy, anonymous mask, chat colors, hangup text and call-contact add button.');

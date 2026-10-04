@@ -701,6 +701,30 @@ function writePhoneContacts(phoneId, contacts) {
   world.setDynamicProperty(PHONE_CONTACTS_PREFIX + phoneId, JSON.stringify(clean));
 }
 
+function phoneContactDateTime(timestamp) {
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return "ไม่ทราบวันเวลา";
+  const date = new Date(timestamp + 7 * 60 * 60 * 1000);
+  const pad = value => String(value).padStart(2, "0");
+  return `${pad(date.getUTCDate())}/${pad(date.getUTCMonth() + 1)}/${date.getUTCFullYear()} เวลา ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())} น.`;
+}
+function updatePhoneContact(ownPhoneId, selected, rawName, rawNumber) {
+  const number = String(rawNumber ?? "").trim();
+  const name = normalizeContactName(rawName);
+  if (!/^\d{4}$/.test(number)) throw new Error("เบอร์ต้องเป็นตัวเลข 4 หลัก");
+  if (name === undefined) throw new Error("ชื่อไม่ถูกต้องหรือยาวเกินกำหนด");
+  const target = readPhoneProfileByNumber(number);
+  if (!target) throw new Error("ไม่พบเบอร์นี้ในระบบ");
+  if (target.id === ownPhoneId) throw new Error("ไม่สามารถบันทึกเบอร์ของตัวเองได้");
+  const contacts = readPhoneContacts(ownPhoneId);
+  const index = contacts.findIndex(c => c.phoneId === selected.phoneId && c.number === selected.number);
+  if (index < 0) throw new Error("ไม่พบรายชื่อที่ต้องการแก้ไข");
+  if (contacts.some((c, i) => i !== index && (c.phoneId === target.id || c.number === number))) throw new Error("มีรายชื่อนี้อยู่แล้ว");
+  const edited = { ...contacts[index], name: name || target.icName, number, phoneId: target.id };
+  contacts[index] = edited;
+  writePhoneContacts(ownPhoneId, contacts);
+  return edited;
+}
+
 function readPhoneInbox(phoneId) {
   try {
     const raw = world.getDynamicProperty(PHONE_INBOX_PREFIX + phoneId);
@@ -937,7 +961,7 @@ async function showPhone(player) {
     const pageNames = [
       "setupName", "setupNumber", "home", "bank", "sendMethod", "sendNumber", "contacts",
       "addContact", "contactDetail", "deleteContact", "compose", "inbox", "messageDetail",
-      "callMethod", "callNumber", "callContacts", "callStatus",
+      "callMethod", "callNumber", "callContacts", "callStatus", "contactsApp", "editContact", "callConfirm",
     ];
     const pages = Object.fromEntries(
       pageNames.map((name) => [name, new ObservableBoolean(false)])
@@ -971,6 +995,12 @@ async function showPhone(player) {
     const addContactNameInput = new ObservableString("", { clientWritable: true });
     const addContactNumberInput = new ObservableString("", { clientWritable: true });
     const addContactStatus = new ObservableString("");
+    const editContactNameInput = new ObservableString("", { clientWritable: true });
+    const editContactNumberInput = new ObservableString("", { clientWritable: true });
+    const editContactStatus = new ObservableString("");
+    const callConfirmText = new ObservableString("");
+    let callConfirmBackPage = "callContacts";
+    const appContactVisible = Array.from({length: PHONE_CONTACT_LIMIT}, () => new ObservableBoolean(false));
     const contactDetailText = new ObservableString("");
     const contactDetailStatus = new ObservableString("");
     const contactFavoriteActionLabel = new ObservableString("เพิ่มรายการโปรด");
@@ -1052,7 +1082,7 @@ async function showPhone(player) {
     let favoritesCache = [];
     let inboxCache = [];
     let selectedContact = undefined;
-    let contactDetailBackPage = "contacts";
+    let contactDetailBackPage = "contactsApp";
     let selectedMessage = undefined;
     let composeRecipient = undefined;
     let addContactBusy = false;
@@ -1066,6 +1096,7 @@ async function showPhone(player) {
       callSpeakerVisible.setData(currentPhonePage === "callStatus" && currentCall?.state === "active");
       callAcceptVisible.setData(currentPhonePage === "callStatus" && currentCall?.b === player.id && currentCall?.state === "ringing");
       for (let i = 0; i < PHONE_CONTACT_LIMIT; i++) {
+        appContactVisible[i].setData(currentPhonePage === "contactsApp" && contactButtonHasData[i] === true);
         callContactVisible[i].setData(currentPhonePage === "callContacts" && contactButtonHasData[i] === true);
         contactButtonVisible[i].setData(
           currentPhonePage === "contacts" && contactButtonHasData[i] === true
@@ -1095,7 +1126,7 @@ async function showPhone(player) {
       contactsCache = readPhoneContacts(activeProfile.id);
       contactSummary.setData(`\nรายชื่อทั้งหมด: §b${contactsCache.length}§r\n`);
       contactEmptyText.setData(
-        contactsCache.length === 0 ? "\nยังไม่มีรายชื่องั้นหรอเพิ่มเลยสิ\n" : ""
+        contactsCache.length === 0 ? "\nยังไม่มีรายชื่อ เพิ่มได้ที่แอปรายชื่อ\n" : ""
       );
 
       for (let i = 0; i < PHONE_CONTACT_LIMIT; i++) {
@@ -1260,13 +1291,14 @@ async function showPhone(player) {
     const openContacts = () => {
       contactDetailStatus.setData("");
       refreshContacts();
-      showPage("contacts");
+      showPage("contactsApp");
     };
+    const openSendContacts = () => { refreshContacts(); showPage("contacts"); };
 
-    let addContactBackPage = "contacts";
+    let addContactBackPage = "contactsApp";
     const returnFromAddContact = () => { refreshContacts(); showPage(addContactBackPage); };
     const openAddContact = () => {
-      addContactBackPage = currentPhonePage === "callContacts" ? "callContacts" : "contacts";
+      addContactBackPage = "contactsApp";
       addContactNameInput.setData("");
       addContactNumberInput.setData("");
       addContactStatus.setData("\nสถานะ: รอข้อมูล\n");
@@ -1274,7 +1306,7 @@ async function showPhone(player) {
       showPage("addContact");
     };
 
-    const openContactDetail = (contact, backPage = "contacts") => {
+    const openContactDetail = (contact, backPage = "contactsApp") => {
       if (!contact) return;
       selectedContact = contact;
       contactDetailBackPage = backPage;
@@ -1282,7 +1314,7 @@ async function showPhone(player) {
       const current = readPhoneProfile(contact.phoneId) ?? readPhoneProfileByNumber(contact.number);
       const realName = current?.icName || contact.name;
       contactDetailText.setData(
-        `\nชื่อที่ตั้ง: §f${contact.name}§r\n\nชื่อจริง: §f${realName}§r\n\nเบอร์: §b${contact.number}§r\n`
+        `\nชื่อที่ตั้ง: §f${contact.name}§r\n\nชื่อ IC: §f${realName}§r\n\nเบอร์: §b${contact.number}§r\n\nเพิ่มเมื่อ: ${phoneContactDateTime(contact.createdAt)}\n`
       );
       contactFavoriteActionLabel.setData(
         contact.favorite === true ? "ลบออกจากรายการโปรด" : "เพิ่มรายการโปรด"
@@ -1292,7 +1324,8 @@ async function showPhone(player) {
 
     const openContactAt = (index) => {
       refreshContacts();
-      openContactDetail(contactsCache[index], "contacts");
+      selectedContact = contactsCache[index];
+      composeSelectedContact();
     };
 
     const openFavoriteAt = (index) => {
@@ -1322,7 +1355,7 @@ async function showPhone(player) {
         refreshContacts();
         if (returnPage === "home") openHome();
         else if (returnPage === "sendMethod") showPage("sendMethod");
-        else showPage("contacts");
+        else showPage("contactsApp");
       } catch (e) {
         console.warn(`[VCMumbleItem/BP] contact delete failed player=${player.name}: ${e}`);
         contactDetailStatus.setData("\n§cลบรายชื่อไม่สำเร็จ กรุณาลองใหม่§r\n");
@@ -1443,9 +1476,32 @@ async function showPhone(player) {
 
     const contactCallPlaceholder = () => {
       if (!selectedContact) return;
-      callNumberInput.setData(selectedContact.number);
+      callConfirmBackPage = currentPhonePage;
+      callConfirmText.setData(`\nชื่อ: ${selectedContact.name}\n\nเบอร์: ${selectedContact.number}\n`);
       callStatusText.setData("");
-      showPage("callNumber");
+      showPage("callConfirm");
+    };
+
+    const beginEditContact = () => {
+      if (!selectedContact) return;
+      editContactNameInput.setData(selectedContact.name);
+      editContactNumberInput.setData(selectedContact.number);
+      editContactStatus.setData("");
+      showPage("editContact");
+    };
+    const submitEditContact = () => {
+      if (!activeProfile || !selectedContact) return;
+      try {
+        selectedContact = updatePhoneContact(activeProfile.id, selectedContact,
+          editContactNameInput.getData(), editContactNumberInput.getData());
+        refreshContacts();
+        openContactDetail(selectedContact, contactDetailBackPage);
+      } catch (error) { editContactStatus.setData(`\n${error.message}\n`); }
+    };
+    const dialSelectedContact = anonymous => {
+      if (!selectedContact) return;
+      callAnonymous = anonymous;
+      dialProfile(readPhoneProfileByNumber(selectedContact.number));
     };
 
     const toggleSelectedContactFavorite = () => {
@@ -1625,6 +1681,7 @@ async function showPhone(player) {
       .button("ส่งข้อความ", openSendMethod, { visible: pages.home })
       .button(inboxHomeButtonLabel, openInbox, { visible: pages.home })
       .button("โทร", openCallMethod, { visible: pages.home })
+      .button("รายชื่อ", openContacts, { visible: pages.home })
       .button("ธนาคาร", () => {
         bankStatus.setData("");
         showPage("bank");
@@ -1650,14 +1707,12 @@ async function showPhone(player) {
       .button("โทร", dialNumber, { visible: pages.callNumber })
       .button("ย้อนกลับ", openCallMethod, { visible: pages.callNumber })
       .header("โทรด้วยรายชื่อ", { visible: pages.callContacts })
-      .button("เพิ่มรายชื่อ", openAddContact, { visible: pages.callContacts })
       .label(contactEmptyText, { visible: pages.callContacts })
-      .button(callAnonymousLabel, toggleCallAnonymous, { visible: pages.callContacts })
       .label(callStatusText, { visible: pages.callContacts });
     for (let i = 0; i < PHONE_CONTACT_LIMIT; i++) {
       form.button(contactButtonLabels[i], () => {
         const contact = contactsCache[i];
-        if (contact) dialProfile(readPhoneProfile(contact.phoneId) ?? readPhoneProfileByNumber(contact.number));
+        if (contact) { selectedContact = contact; contactCallPlaceholder(); }
       }, { visible: callContactVisible[i] });
     }
     form
@@ -1686,7 +1741,7 @@ async function showPhone(player) {
       .header("ส่งข้อความ", { visible: pages.sendMethod })
       .label("\nเลือกวิธีระบุผู้รับข้อความ\n", { visible: pages.sendMethod })
       .button("ส่งด้วยเบอร์", openDirectNumber, { visible: pages.sendMethod })
-      .button("ส่งด้วยรายชื่อ", openContacts, { visible: pages.sendMethod })
+      .button("ส่งด้วยรายชื่อ", openSendContacts, { visible: pages.sendMethod })
       .button("ย้อนกลับ", openHome, { visible: pages.sendMethod })
 
       .header("ส่งด้วยเบอร์", { visible: pages.sendNumber })
@@ -1701,7 +1756,6 @@ async function showPhone(player) {
 
       .header("รายชื่อ", { visible: pages.contacts })
       .label(contactSummary, { visible: pages.contacts })
-      .button("เพิ่มรายชื่อ", openAddContact, { visible: pages.contacts })
       .label(contactEmptyText, { visible: pages.contacts });
 
     for (let i = 0; i < PHONE_CONTACT_LIMIT; i++) {
@@ -1711,6 +1765,27 @@ async function showPhone(player) {
     form
       .button("ย้อนกลับ", openSendMethod, { visible: pages.contacts })
 
+      .header("รายชื่อ", { visible: pages.contactsApp })
+      .label(contactSummary, { visible: pages.contactsApp })
+      .button("เพิ่มรายชื่อ", openAddContact, { visible: pages.contactsApp })
+      .label(contactEmptyText, { visible: pages.contactsApp });
+    for (let i = 0; i < PHONE_CONTACT_LIMIT; i++) {
+      form.button(contactButtonLabels[i], () => openContactDetail(contactsCache[i], "contactsApp"), { visible: appContactVisible[i] });
+    }
+    form
+      .button("ย้อนกลับ", openHome, { visible: pages.contactsApp })
+      .header("แก้ไขรายชื่อ", { visible: pages.editContact })
+      .textField("ชื่อที่ตั้ง", editContactNameInput, { visible: pages.editContact })
+      .textField("เบอร์ 4 หลัก", editContactNumberInput, { visible: pages.editContact })
+      .label(editContactStatus, { visible: pages.editContact })
+      .button("บันทึก", submitEditContact, { visible: pages.editContact })
+      .button("ยกเลิก", () => showPage("contactDetail"), { visible: pages.editContact })
+      .header("โทรหารายชื่อ", { visible: pages.callConfirm })
+      .label(callConfirmText, { visible: pages.callConfirm })
+      .label(callStatusText, { visible: pages.callConfirm })
+      .button("โทรปกติ", () => dialSelectedContact(false), { visible: pages.callConfirm })
+      .button("โทรแบบไม่ระบุตัวตน", () => dialSelectedContact(true), { visible: pages.callConfirm })
+      .button("ย้อนกลับ", () => showPage(callConfirmBackPage), { visible: pages.callConfirm })
       .header("เพิ่มรายชื่อ", { visible: pages.addContact })
       .label("\nกรอกชื่อที่ต้องการตั้ง หากเว้นว่างจะใช้ชื่อ IC ของเบอร์นั้น\n", { visible: pages.addContact })
       .textField("ชื่อรายชื่อ", addContactNameInput, {
@@ -1727,6 +1802,7 @@ async function showPhone(player) {
 
       .header("ข้อมูลรายชื่อ", { visible: pages.contactDetail })
       .label(contactDetailText, { visible: pages.contactDetail })
+      .button("แก้ไข", beginEditContact, { visible: pages.contactDetail })
       .button("ส่งข้อความ", composeSelectedContact, { visible: pages.contactDetail })
       .button("โทร", contactCallPlaceholder, { visible: pages.contactDetail })
       .button(contactFavoriteActionLabel, toggleSelectedContactFavorite, { visible: pages.contactDetail })
@@ -2603,5 +2679,5 @@ system.runInterval(() => {
 }, 100);
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.15.10 — SleepyPhone call Mic + contacts + chat colors"
+  "[VCMumbleItem/BP] Loaded v2.15.10 — SleepyPhone Contacts application"
 );

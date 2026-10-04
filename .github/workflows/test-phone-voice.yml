@@ -14,6 +14,7 @@ jobs:
       - run: |
           node --check addon/BP/scripts/main.js
           node tests/test_phone_calls.mjs
+          node tests/test_contacts_ui.mjs
           python3 tests/test_phone_voice.py
           python3 tests/test_unified_contract.py
           g++ -std=c++17 -fPIC tests/test_call_routing.cpp mumble-patch/VCProximity.cpp -I mumble-patch $(pkg-config --cflags --libs Qt6Core) -o /tmp/test-call-routing
