@@ -8,6 +8,7 @@ import {
   PlayerPermissionLevel,
 } from "@minecraft/server";
 import {
+  ActionFormData,
   CustomForm,
   ObservableBoolean,
   ObservableNumber,
@@ -727,7 +728,7 @@ function updatePhoneContact(ownPhoneId, selected, rawName, rawNumber) {
 
 function readPhoneInbox(phoneId) {
   try {
-    const raw = world.getDynamicProperty(PHONE_INBOX_PREFIX + phoneId);
+    const raw = JSON.stringify(readPhoneHistoryStore(PHONE_INBOX_PREFIX + phoneId));
     if (typeof raw !== "string" || !raw) return [];
     const data = JSON.parse(raw);
     if (!Array.isArray(data)) return [];
@@ -742,29 +743,47 @@ function readPhoneInbox(phoneId) {
         timestamp: Number(entry?.timestamp ?? 0),
         read: entry?.read === true,
       }))
-      .filter((entry) => entry.id && entry.senderName && entry.senderNumber && entry.body)
-      .slice(0, PHONE_INBOX_LIMIT);
+      .filter((entry) => entry.id && entry.senderName && entry.senderNumber && entry.body);
   } catch {
     return [];
   }
 }
 
 function writePhoneInbox(phoneId, inbox) {
-  const clean = Array.isArray(inbox) ? inbox.slice(0, PHONE_INBOX_LIMIT) : [];
-  world.setDynamicProperty(PHONE_INBOX_PREFIX + phoneId, JSON.stringify(clean));
+  writePhoneHistoryStore(PHONE_INBOX_PREFIX + phoneId, Array.isArray(inbox) ? inbox : []);
 }
 
 function readPhoneOutgoing(phoneId) {
   try {
-    const data = JSON.parse(world.getDynamicProperty("vcmphone:outgoing:" + phoneId) || "[]");
+    const data = readPhoneHistoryStore("vcmphone:outgoing:" + phoneId);
     return Array.isArray(data) ? data.filter(m => m.id && m.peerPhoneId && m.body) : [];
   } catch { return []; }
 }
 function writePhoneOutgoing(phoneId, messages) {
-  const kept = messages.slice(0, 100);
-  const bytes = text => { let size = 0; for (const char of text) { const code = char.codePointAt(0); size += code < 128 ? 1 : code < 2048 ? 2 : code < 65536 ? 3 : 4; } return size; };
-  while (kept.length && bytes(JSON.stringify(kept)) > 28000) kept.pop();
-  world.setDynamicProperty("vcmphone:outgoing:" + phoneId, JSON.stringify(kept));
+  writePhoneHistoryStore("vcmphone:outgoing:" + phoneId, messages);
+}
+function readPhoneHistoryStore(key) {
+  const data = JSON.parse(world.getDynamicProperty(key) || "[]");
+  if (Array.isArray(data)) return data;
+  const messages = [];
+  for (let i = 0; i < (data.chunks || 0); i++) {
+    messages.push(...JSON.parse(world.getDynamicProperty(`${key}:chunk:${i}`) || "[]"));
+  }
+  return messages;
+}
+function writePhoneHistoryStore(key, messages) {
+  const previous = JSON.parse(world.getDynamicProperty(key) || "[]");
+  const chunks = []; let chunk = [], size = 2;
+  const bytes = text => { let n = 0; for (const c of text) { const code = c.codePointAt(0); n += code < 128 ? 1 : code < 2048 ? 2 : code < 65536 ? 3 : 4; } return n; };
+  for (const message of messages) {
+    const length = bytes(JSON.stringify(message)) + 1;
+    if (size + length > 28000 && chunk.length) { chunks.push(chunk); chunk = []; size = 2; }
+    chunk.push(message); size += length;
+  }
+  if (chunk.length) chunks.push(chunk);
+  chunks.forEach((entries, i) => world.setDynamicProperty(`${key}:chunk:${i}`, JSON.stringify(entries)));
+  world.setDynamicProperty(key, JSON.stringify({ chunks: chunks.length }));
+  for (let i = chunks.length; i < (previous.chunks || 0); i++) world.setDynamicProperty(`${key}:chunk:${i}`, undefined);
 }
 function readPhoneDeleted(phoneId) {
   try { const ids = JSON.parse(world.getDynamicProperty("vcmphone:deleted:" + phoneId) || "[]"); return Array.isArray(ids) ? ids : []; }
@@ -835,12 +854,12 @@ function markPhoneConversationRead(ownId, peerId, anonymous = false) {
   if (changed) writePhoneInbox(ownId, inbox);
   for (const [senderId, outgoing] of changedSenders) writePhoneOutgoing(senderId, outgoing);
 }
-function phoneConversationText(messages, page = 0) {
-  const pageSize = 5;
+function phoneConversationText(messages, page = 0, all = false) {
+  const pageSize = 10;
   const totalPages = Math.max(1, Math.ceil(messages.length / pageSize));
   page = Math.max(0, Math.min(page, totalPages - 1));
   const end = Math.max(0, messages.length - page * pageSize);
-  const chunk = messages.slice(Math.max(0, end - pageSize), end);
+  const chunk = all ? messages : messages.slice(Math.max(0, end - pageSize), end);
   const text = chunk.map(m => {
     const stamp = formatPhoneMessageTime(m.timestamp);
     const color = m.id === messages[messages.length - 1]?.id ? "§f" : "§7";
@@ -1086,6 +1105,7 @@ async function showPhone(player, requestedAt = Date.now()) {
 
     let form;
     let requestedPage = false;
+    let requestedHistory;
     let currentPhonePage = "";
     let syncDynamicButtonVisibility = () => {};
     const showPage = (name) => {
@@ -1142,6 +1162,7 @@ async function showPhone(player, requestedAt = Date.now()) {
     const inboxSummary = new ObservableString("");
     const inboxEmptyText = new ObservableString("");
     const messageDetailText = new ObservableString("");
+    const messagePeerText = new ObservableString("");
     const messageDetailStatus = new ObservableString("");
     const deleteChatText = new ObservableString("");
 
@@ -1571,6 +1592,25 @@ async function showPhone(player, requestedAt = Date.now()) {
       });
     };
 
+    const openFullHistory = () => {
+      requestedHistory = currentPhonePage;
+      requestedPage = true;
+      form.close();
+    };
+    const showFullHistory = async (returnPage) => {
+      const composing = returnPage === "compose";
+      const peerId = composing ? composeRecipient.id : selectedMessage.senderPhoneId;
+      const anonymous = !composing && selectedMessage.anonymous;
+      markPhoneConversationRead(activeProfile.id, peerId, anonymous);
+      const messages = phoneConversationMessages(activeProfile.id, peerId, anonymous);
+      const identity = composing ? composeRecipientText.getData() : (anonymous ? ANONYMOUS_NUMBER : selectedMessage.senderNumber);
+      await new ActionFormData()
+        .title("SleepyPhone — ประวัติแชททั้งหมด")
+        .body(`${identity}\n\nทั้งหมด ${messages.length} ข้อความ\n\n${phoneConversationText(messages, 0, true).text}`)
+        .button("กลับไปแชท")
+        .show(player);
+      if (composing) refreshComposeHistory(); else refreshDetailHistory();
+    };
     const refreshComposeHistory = () => {
       if (!composeRecipient || !activeProfile) return;
       markPhoneConversationRead(activeProfile.id, composeRecipient.id);
@@ -1584,7 +1624,8 @@ async function showPhone(player, requestedAt = Date.now()) {
       detailHistoryPage = history.page;
       const name = resolveIncomingMessageName(activeProfile.id, selectedMessage);
       const number = selectedMessage.anonymous ? ANONYMOUS_NUMBER : selectedMessage.senderNumber;
-      messageDetailText.setData(`\n${name && !selectedMessage.anonymous ? name + " (" + number + ")" : number}\n\n${detailHistoryPage > 0 ? "ข้อความเก่า\n\n" : ""}${history.text}\n`);
+      messagePeerText.setData(`\n${name && !selectedMessage.anonymous ? name + " (" + number + ")" : number}\n`);
+      messageDetailText.setData(`\n${history.text}\n`);
     };
     const beginCompose = (targetProfile, displayName = undefined) => {
       if (!targetProfile) return;
@@ -1972,9 +2013,8 @@ async function showPhone(player, requestedAt = Date.now()) {
 
       .header("เขียนข้อความ", { visible: pages.compose })
       .label(composeRecipientText, { visible: pages.compose })
+      .button("ดูประวัติแชททั้งหมด", openFullHistory, { visible: pages.compose })
       .label(composeHistoryText, { visible: pages.compose })
-      .button("เก่ากว่า", () => { composeHistoryPage++; refreshComposeHistory(); showPage("compose"); }, { visible: composeOlderVisible })
-      .button("ใหม่กว่า", () => { composeHistoryPage--; refreshComposeHistory(); showPage("compose"); }, { visible: composeNewerVisible })
       .textField("ข้อความ", composeInput, {
         visible: pages.compose,
         description: `\nสูงสุด ${PHONE_MESSAGE_MAX_LENGTH} ตัวอักษร\n`,
@@ -1999,9 +2039,9 @@ async function showPhone(player, requestedAt = Date.now()) {
       .button("ย้อนกลับ", openHome, { visible: pages.inbox })
 
       .header("ข้อความ", { visible: pages.messageDetail })
+      .label(messagePeerText, { visible: pages.messageDetail })
+      .button("ดูประวัติแชททั้งหมด", openFullHistory, { visible: pages.messageDetail })
       .label(messageDetailText, { visible: pages.messageDetail })
-      .button("เก่ากว่า", () => { detailHistoryPage++; refreshDetailHistory(); showPage("messageDetail"); }, { visible: detailOlderVisible })
-      .button("ใหม่กว่า", () => { detailHistoryPage--; refreshDetailHistory(); showPage("messageDetail"); }, { visible: detailNewerVisible })
       .button("ตอบกลับ", replySelectedMessage, { visible: pages.messageDetail })
       .button("ลบแชท", beginDeleteChat, { visible: pages.messageDetail })
       .button("ย้อนกลับ", openInbox, { visible: pages.messageDetail })
@@ -2024,6 +2064,12 @@ async function showPhone(player, requestedAt = Date.now()) {
 
       await form.show();
       form = undefined;
+      if (requestedHistory) {
+        const returnPage = requestedHistory;
+        requestedHistory = undefined;
+        await new Promise(resolve => system.run(resolve));
+        await showFullHistory(returnPage);
+      }
       if (requestedPage) {
         requestedAt = Date.now();
         await new Promise(resolve => system.run(resolve));
@@ -2865,5 +2911,5 @@ system.runInterval(() => {
 }, 100);
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.15.14 — confirmed whole-chat deletion"
+  "[VCMumbleItem/BP] Loaded v2.15.15 — confirmed whole-chat deletion"
 );

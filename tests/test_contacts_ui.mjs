@@ -3,7 +3,8 @@ import vm from 'node:vm';
 import assert from 'node:assert/strict';
 const source=fs.readFileSync(new URL('../addon/BP/scripts/main.js', import.meta.url),'utf8');
 class Observable { constructor(value){this.value=value;} getData(){return this.value;} setData(value){this.value=value;} }
-let form, dial;
+let form, dial, historyBody;
+class ActionForm { title(){return this;} body(text){historyBody=text;return this;} button(){return this;} show(){return Promise.resolve({selection:0});} }
 class Form {
  constructor(){form=this;this.entries=[];}
  button(label,action,options={}){this.entries.push({type:'button',label,action,...options});return this;}
@@ -14,7 +15,7 @@ class Form {
 }
 let contacts=[{phoneId:'pb',name:'Saved Bob',number:'0002',createdAt:Date.UTC(2026,9,4,21,0),favorite:false}];
 const profiles={pa:{id:'pa',icName:'Alice',number:'0001'},pb:{id:'pb',icName:'Bob',number:'0002'},pc:{id:'pc',icName:'Carol',number:'0003'}};
-const ctx=vm.createContext({console,Date,ObservableBoolean:Observable,ObservableString:Observable,ObservableNumber:Observable,CustomForm:Form,
+const ctx=vm.createContext({console,Date,ObservableBoolean:Observable,ObservableString:Observable,ObservableNumber:Observable,CustomForm:Form,ActionFormData:ActionForm,
  openPhonePlayers:new Set(),openSettingsPlayers:new Set(),resolvePhoneProfile:()=>({slot:{},profile:profiles.pa}),
  PHONE_CONTACT_LIMIT:30,PHONE_INBOX_LIMIT:30,PHONE_NAME_MAX_LENGTH:24,PHONE_CONTACT_NAME_MAX_LENGTH:24,PHONE_MESSAGE_MAX_LENGTH:500,
  ANONYMOUS_NAME:'ไม่ระบุตัวตน',ANONYMOUS_NUMBER:'#@+*',
@@ -74,6 +75,9 @@ await click('ย้อนกลับ');await click('ย้อนกลับ');
 assert.equal(buttons().filter(b=>String(value(b.label)).includes('0003')).length,1);
 await click('Saved Carol - 0003');
 assert.match(form.entries.filter(e=>e.type==='label').map(e=>value(e.value)).join('\n'),/first message[\s\S]*second message/);
+await click('ดูประวัติแชททั้งหมด');
+assert.match(historyBody,/first message[\s\S]*second message/);
+assert.ok(buttons().some(b=>value(b.label)==='ลบแชท'));
 await click('ลบแชท');
 assert.equal(ctx.readPhoneOutgoing('pa').length,2);
 await click('ยกเลิก');
