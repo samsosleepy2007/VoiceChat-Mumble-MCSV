@@ -15,6 +15,7 @@ jobs:
           node --check addon/BP/scripts/main.js
           node tests/test_phone_calls.mjs
           node tests/test_contacts_ui.mjs
+          node tests/test_phone_history.mjs
           python3 tests/test_phone_voice.py
           python3 tests/test_unified_contract.py
           g++ -std=c++17 -fPIC tests/test_call_routing.cpp mumble-patch/VCProximity.cpp -I mumble-patch $(pkg-config --cflags --libs Qt6Core) -o /tmp/test-call-routing
@@ -28,4 +29,4 @@ jobs:
           name: sleepyphone-4-block-test
           path: |
             dist/*.whl
-            release-assets/VC_Mumble_ItemMic_v2.15.11_MicFix.mcaddon
+            release-assets/VC_Mumble_ItemMic_v2.15.12_MicFix.mcaddon

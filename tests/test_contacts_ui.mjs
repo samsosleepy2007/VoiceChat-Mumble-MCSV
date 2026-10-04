@@ -18,6 +18,7 @@ const ctx=vm.createContext({console,Date,ObservableBoolean:Observable,Observable
  openPhonePlayers:new Set(),openSettingsPlayers:new Set(),resolvePhoneProfile:()=>({slot:{},profile:profiles.pa}),
  PHONE_CONTACT_LIMIT:30,PHONE_INBOX_LIMIT:30,PHONE_NAME_MAX_LENGTH:24,PHONE_CONTACT_NAME_MAX_LENGTH:24,PHONE_MESSAGE_MAX_LENGTH:500,
  ANONYMOUS_NAME:'ไม่ระบุตัวตน',ANONYMOUS_NUMBER:'#@+*',
+ world: { getDynamicProperty:()=>undefined, setDynamicProperty(){} },
  readPhoneContacts:()=>contacts.map(c=>({...c})),writePhoneContacts:(_,c)=>{contacts=c;},
  readPhoneProfile:id=>profiles[id],readPhoneProfileByNumber:n=>Object.values(profiles).find(p=>p.number===n),
  readPhoneInbox:()=>[],phoneCallFor:()=>undefined,
@@ -26,6 +27,7 @@ const ctx=vm.createContext({console,Date,ObservableBoolean:Observable,Observable
  system:{run:f=>f(),runTimeout:f=>f()},
 });
 vm.runInContext(source.slice(source.indexOf('function phoneContactDateTime('),source.indexOf('function readPhoneInbox(')),ctx);
+vm.runInContext(source.slice(source.indexOf('function readPhoneOutgoing('),source.indexOf('function createMessageId(')),ctx);
 vm.runInContext(source.slice(source.indexOf('function phonePageForm('),source.indexOf('function handlePhoneUse(')),ctx);
 const session = ctx.showPhone({id:'a',name:'Alice'});
 const settle = () => new Promise(resolve=>setImmediate(resolve));
@@ -55,3 +57,22 @@ console.log('PASS: actual DDUI contacts app, details, Bangkok date, edit retarge
 await session;
 assert.equal(ctx.openPhonePlayers.size,0);
 console.log('PASS: separate native forms, small Home, navigation waits for close, and session unlocks after dial.');
+// Exercise sending through the real DDUI callbacks and reopening a thread.
+const data=new Map(), inboxData=new Map();let messageSequence=0;
+ctx.world.getDynamicProperty=k=>data.get(k);ctx.world.setDynamicProperty=(k,v)=>data.set(k,v);
+ctx.readPhoneInbox=id=>inboxData.get(id)||[];ctx.writePhoneInbox=(id,m)=>inboxData.set(id,m);
+ctx.normalizeMessage=s=>s.trim();ctx.createMessageId=()=>`sent${++messageSequence}`;ctx.notifyPhoneRecipient=()=>{};
+ctx.resolveIncomingMessageName=(_,m)=>contacts.find(c=>c.phoneId===m.senderPhoneId)?.name||'';
+vm.runInContext(source.slice(source.indexOf('function formatPhoneMessageTime('),source.indexOf('function slotHasPhoneId(')),ctx);
+const messaging=ctx.showPhone({id:'a',name:'Alice'});await settle();
+await click('ส่งข้อความ');await click('ส่งด้วยรายชื่อ');await click('Saved Carol - 0003');
+field('ข้อความ','first message');await click('ส่งข้อความ');
+field('ข้อความ','second message');await click('ส่งข้อความ');
+assert.equal(inboxData.get('pc').length,2);
+assert.match(form.entries.filter(e=>e.type==='label').map(e=>value(e.value)).join('\n'),/first message[\s\S]*second message/);
+await click('ย้อนกลับ');await click('ย้อนกลับ');await click('กล่องข้อความ');
+assert.equal(buttons().filter(b=>String(value(b.label)).includes('0003')).length,1);
+await click('Saved Carol - 0003');
+assert.match(form.entries.filter(e=>e.type==='label').map(e=>value(e.value)).join('\n'),/first message[\s\S]*second message/);
+form.close();await messaging;
+console.log('PASS: DDUI sends persist two-way history, stays in conversation and Inbox groups messages once.');
