@@ -70,6 +70,7 @@ void VCStateFeed::applyDatagram(const QByteArray &payload) {
         || type == QStringLiteral("bridge_disconnected")) {
         VCProximity::setEnabled(true);
         VCProximity::clearPlayers();
+        VCProximity::clearCalls();
         return;
     }
 
@@ -85,6 +86,26 @@ void VCStateFeed::applyDatagram(const QByteArray &payload) {
         }
         if (!mumbleName.isEmpty()) {
             VCProximity::removePlayer(mumbleName);
+        }
+        return;
+    }
+
+    if (type == QStringLiteral("call_end")) {
+        const QString callId = data.value(QStringLiteral("callId")).toString().trimmed();
+        if (!callId.isEmpty()) {
+            VCProximity::removeCall(callId);
+        }
+        return;
+    }
+
+    if (type == QStringLiteral("call_state")) {
+        const QString callId = data.value(QStringLiteral("callId")).toString().trimmed();
+        const QString partyA = data.value(QStringLiteral("partyA")).toString().trimmed();
+        const QString partyB = data.value(QStringLiteral("partyB")).toString().trimmed();
+        const bool speakerA = data.value(QStringLiteral("speakerA")).toBool(false);
+        const bool speakerB = data.value(QStringLiteral("speakerB")).toBool(false);
+        if (!callId.isEmpty() && !partyA.isEmpty() && !partyB.isEmpty()) {
+            VCProximity::updateCall(callId, partyA, partyB, speakerA, speakerB);
         }
         return;
     }

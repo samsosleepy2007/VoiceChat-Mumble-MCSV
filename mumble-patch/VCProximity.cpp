@@ -25,8 +25,18 @@ struct PlayerState {
     qint64 updatedAtMs = 0;
 };
 
+struct CallState {
+    QString id;
+    QString partyA;
+    QString partyB;
+    bool speakerA = false;
+    bool speakerB = false;
+    qint64 updatedAtMs = 0;
+};
+
 QReadWriteLock g_lock;
 QHash<QString, PlayerState> g_players;
+QHash<QString, CallState> g_calls;
 std::atomic_bool g_enabled{ false };
 std::atomic<qint64> g_staleTimeoutMs{ 45000 };
 std::atomic<qint64> g_lastStateLogMs{ 0 };
@@ -163,11 +173,51 @@ void touchPlayers() {
     for (auto it = g_players.begin(); it != g_players.end(); ++it) {
         it.value().updatedAtMs = now;
     }
+    for (auto it = g_calls.begin(); it != g_calls.end(); ++it) {
+        it.value().updatedAtMs = now;
+    }
 }
 
 int playerCount() {
     QReadLocker locker(&g_lock);
     return g_players.size();
+}
+
+void updateCall(const QString &callId,
+                const QString &partyA,
+                const QString &partyB,
+                bool speakerA,
+                bool speakerB) {
+    const QString id = callId.trimmed();
+    const QString keyA = keyFor(partyA);
+    const QString keyB = keyFor(partyB);
+    if (id.isEmpty() || keyA.isEmpty() || keyB.isEmpty() || keyA == keyB) return;
+
+    CallState state;
+    state.id = id;
+    state.partyA = keyA;
+    state.partyB = keyB;
+    state.speakerA = speakerA;
+    state.speakerB = speakerB;
+    state.updatedAtMs = QDateTime::currentMSecsSinceEpoch();
+
+    QWriteLocker locker(&g_lock);
+    g_calls.insert(id, state);
+}
+
+void removeCall(const QString &callId) {
+    QWriteLocker locker(&g_lock);
+    g_calls.remove(callId.trimmed());
+}
+
+void clearCalls() {
+    QWriteLocker locker(&g_lock);
+    g_calls.clear();
+}
+
+int callCount() {
+    QReadLocker locker(&g_lock);
+    return g_calls.size();
 }
 
 float attenuationFactor(const QString &speakerName, const QString &listenerName) {
@@ -195,42 +245,118 @@ float attenuationFactor(const QString &speakerName, const QString &listenerName)
     QReadLocker locker(&g_lock);
     const auto speakerIt = g_players.constFind(speakerKey);
     const auto listenerIt = g_players.constFind(listenerKey);
-    if (speakerIt == g_players.constEnd()) return finish(0.0F, "speaker-not-tracked", "tracked=" + QString::number(g_players.size()));
-    if (listenerIt == g_players.constEnd()) return finish(0.0F, "listener-not-tracked", "tracked=" + QString::number(g_players.size()));
+    if (speakerIt == g_players.constEnd()) {
+        return finish(0.0F, "speaker-not-tracked", "tracked=" + QString::number(g_players.size()));
+    }
+    if (listenerIt == g_players.constEnd()) {
+        return finish(0.0F, "listener-not-tracked", "tracked=" + QString::number(g_players.size()));
+    }
 
     const PlayerState speaker = speakerIt.value();
     const PlayerState listener = listenerIt.value();
-    locker.unlock();
 
     if (!isFresh(speaker, now)) return finish(0.0F, "speaker-stale");
     if (!isFresh(listener, now)) return finish(0.0F, "listener-stale");
-    if (!speaker.voiceEnabled) return finish(0.0F, "speaker-mic-off");
     if (speakerKey == listenerKey) return finish(1.0F, "self");
-    if (speaker.dimension.isEmpty() || speaker.dimension != listener.dimension) {
-        return finish(0.0F, "dimension-mismatch", "speakerDim=" + speaker.dimension + " listenerDim=" + listener.dimension);
+
+    float proximityFactor = 0.0F;
+    double proximityDistance = -1.0;
+    if (speaker.voiceEnabled && !speaker.dimension.isEmpty() && speaker.dimension == listener.dimension) {
+        const double range = static_cast<double>(speaker.rangeBlocks);
+        if (range > 0.0) {
+            const double dx = speaker.x - listener.x;
+            const double dy = speaker.y - listener.y;
+            const double dz = speaker.z - listener.z;
+            const double distanceSquared = dx * dx + dy * dy + dz * dz;
+            if (distanceSquared < range * range) {
+                proximityDistance = std::sqrt(distanceSquared);
+                proximityFactor = attenuationForNormalizedDistance(
+                    proximityDistance / range,
+                    speaker.attenuationLevel
+                );
+            }
+        }
     }
 
-    const double range = static_cast<double>(speaker.rangeBlocks);
-    if (range <= 0.0) return finish(0.0F, "range-zero");
+    float callFactor = 0.0F;
+    QString callReason;
+    double speakerDistance = -1.0;
 
-    const double dx = speaker.x - listener.x;
-    const double dy = speaker.y - listener.y;
-    const double dz = speaker.z - listener.z;
-    const double distanceSquared = dx * dx + dy * dy + dz * dz;
-    const double distance = std::sqrt(distanceSquared);
-    if (distanceSquared >= range * range) {
-        return finish(0.0F, "out-of-range",
-                      QString("distance=%1 range=%2").arg(distance, 0, 'f', 2).arg(range, 0, 'f', 2));
+    for (auto it = g_calls.constBegin(); it != g_calls.constEnd(); ++it) {
+        const CallState &call = it.value();
+        if ((now - call.updatedAtMs) > g_staleTimeoutMs.load(std::memory_order_relaxed)) {
+            continue;
+        }
+
+        QString remoteKey;
+        bool remoteSpeakerEnabled = false;
+        if (call.partyA == speakerKey) {
+            remoteKey = call.partyB;
+            remoteSpeakerEnabled = call.speakerB;
+        } else if (call.partyB == speakerKey) {
+            remoteKey = call.partyA;
+            remoteSpeakerEnabled = call.speakerA;
+        } else {
+            continue;
+        }
+
+        if (listenerKey == remoteKey) {
+            callFactor = 1.0F;
+            callReason = "call-direct";
+            break;
+        }
+
+        if (!remoteSpeakerEnabled) continue;
+
+        const auto remoteIt = g_players.constFind(remoteKey);
+        if (remoteIt == g_players.constEnd()) continue;
+        const PlayerState remote = remoteIt.value();
+        if (!isFresh(remote, now)) continue;
+        if (remote.dimension.isEmpty() || remote.dimension != listener.dimension) continue;
+
+        const double dx = remote.x - listener.x;
+        const double dy = remote.y - listener.y;
+        const double dz = remote.z - listener.z;
+        const double distanceSquared = dx * dx + dy * dy + dz * dz;
+        constexpr double kSpeakerRadius = 4.0;
+        if (distanceSquared >= kSpeakerRadius * kSpeakerRadius) continue;
+
+        const double distance = std::sqrt(distanceSquared);
+        const float factor = attenuationForNormalizedDistance(distance / kSpeakerRadius, 2);
+        if (factor > callFactor) {
+            callFactor = factor;
+            callReason = "call-speaker";
+            speakerDistance = distance;
+        }
     }
 
-    const double normalizedDistance = distance / range;
-    const float factor = attenuationForNormalizedDistance(normalizedDistance, speaker.attenuationLevel);
-    return finish(factor, "routed",
-                  QString("distance=%1 range=%2 level=%3 mic=%4")
-                      .arg(distance, 0, 'f', 2)
-                      .arg(range, 0, 'f', 2)
-                      .arg(speaker.attenuationLevel)
-                      .arg(speaker.voiceEnabled ? QStringLiteral("on") : QStringLiteral("off")));
+    locker.unlock();
+
+    const float factor = std::max(proximityFactor, callFactor);
+    if (factor <= 0.0F) {
+        return finish(
+            0.0F,
+            "not-routed",
+            "speakerDim=" + speaker.dimension + " listenerDim=" + listener.dimension
+        );
+    }
+
+    if (callFactor >= proximityFactor && callFactor > 0.0F) {
+        QString extra;
+        if (speakerDistance >= 0.0) {
+            extra = QString("speakerDistance=%1 speakerRadius=4").arg(speakerDistance, 0, 'f', 2);
+        }
+        return finish(factor, callReason, extra);
+    }
+
+    return finish(
+        factor,
+        "proximity",
+        QString("distance=%1 range=%2 level=%3")
+            .arg(proximityDistance, 0, 'f', 2)
+            .arg(speaker.rangeBlocks, 0, 'f', 2)
+            .arg(speaker.attenuationLevel)
+    );
 }
 
 bool shouldRoute(const QString &speakerName, const QString &listenerName) {

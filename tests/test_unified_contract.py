@@ -19,9 +19,9 @@ host = HOST.read_text(encoding="utf-8")
 config = tomllib.loads(CONFIG.read_text(encoding="utf-8"))
 project = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
 
-assert project["project"]["version"] == "0.5.3"
+assert project["project"]["version"] == "0.5.4"
 assert "class MumbleHost(Plugin):" in plugin
-assert 'version = "0.5.3"' in plugin
+assert 'version = "0.5.4"' in plugin
 assert "BridgeRelay" not in plugin
 assert "bridge_relay" not in plugin
 assert '"vcmumble.mic.on"' in plugin
@@ -78,4 +78,4 @@ assert json.loads(data.decode("utf-8")) == payload
 sink.stop()
 receiver.close()
 
-print("MumbleHost unified v0.5.3 contract: OK")
+print("MumbleHost unified v0.5.4 contract: OK")

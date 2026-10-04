@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "endstone-mumble-host"
-version = "0.5.3"
+version = "0.5.4"
 description = "Unified MCSV Mumble Server with Item Mic proximity routing"
 requires-python = ">=3.11"
 dependencies = ["endstone>=0.11.0"]
