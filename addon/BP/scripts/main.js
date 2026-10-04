@@ -792,10 +792,27 @@ function phoneConversationMessages(ownId, peerId, anonymous = false) {
   if (!anonymous) {
     // Recover previous sent messages still retained in the recipient's inbox.
     for (const m of [...readPhoneInbox(peerId)].reverse()) if (m.senderPhoneId === ownId) messages.set(m.id, { ...m, outgoing: true });
-    for (const m of [...readPhoneOutgoing(ownId)].reverse()) if (m.peerPhoneId === peerId) messages.set(m.id, { ...m, outgoing: true });
+    for (const m of [...readPhoneOutgoing(ownId)].reverse()) if (m.peerPhoneId === peerId) messages.set(m.id, { ...m, read: m.read === true || messages.get(m.id)?.read === true, outgoing: true });
   }
   const deleted = new Set(readPhoneDeleted(ownId));
   return [...messages.values()].filter(m => !deleted.has(m.id)).sort((a,b) => a.timestamp - b.timestamp);
+}
+function markPhoneConversationRead(ownId, peerId, anonymous = false) {
+  const inbox = readPhoneInbox(ownId);
+  const changedSenders = new Map();
+  let changed = false;
+  for (const message of inbox) {
+    if (message.senderPhoneId !== peerId || message.anonymous !== anonymous || message.read) continue;
+    message.read = true;
+    changed = true;
+    let outgoing = changedSenders.get(message.senderPhoneId);
+    if (!outgoing) { outgoing = readPhoneOutgoing(message.senderPhoneId); changedSenders.set(message.senderPhoneId, outgoing); }
+    const sent = outgoing.find(entry => entry.id === message.id);
+    if (sent) sent.read = true;
+    else outgoing.unshift({ ...message, peerPhoneId: ownId, peerNumber: readPhoneProfile(ownId)?.number || "" });
+  }
+  if (changed) writePhoneInbox(ownId, inbox);
+  for (const [senderId, outgoing] of changedSenders) writePhoneOutgoing(senderId, outgoing);
 }
 function phoneConversationText(messages, page = 0) {
   const pageSize = 5;
@@ -805,7 +822,9 @@ function phoneConversationText(messages, page = 0) {
   const chunk = messages.slice(Math.max(0, end - pageSize), end);
   const text = chunk.map(m => {
     const stamp = formatPhoneMessageTime(m.timestamp);
-    return `${stamp.date} ${stamp.time}\n${m.outgoing ? "คุณ" : m.anonymous ? "ไม่ระบุตัวตน" : "ปลายสาย"}${m.outgoing && m.anonymous ? " (ไม่ระบุตัวตน)" : ""}: ${m.body}`;
+    const color = m.id === messages[messages.length - 1]?.id ? "§f" : "§7";
+    const receipt = m.outgoing ? `\nสถานะ: ${m.read === true ? "อ่านแล้ว" : "ยังไม่อ่าน"}` : "";
+    return `${color}${stamp.date} ${stamp.time}\n${m.outgoing ? "คุณ" : m.anonymous ? "ไม่ระบุตัวตน" : "ปลายสาย"}${m.outgoing && m.anonymous ? " (ไม่ระบุตัวตน)" : ""}: ${m.body}${receipt}§r`;
   }).join("\n\n");
   return { page, older: page + 1 < totalPages, newer: page > 0, text: text || "ยังไม่มีประวัติการคุย", totalPages };
 }
@@ -1532,6 +1551,7 @@ async function showPhone(player, requestedAt = Date.now()) {
 
     const refreshComposeHistory = () => {
       if (!composeRecipient || !activeProfile) return;
+      markPhoneConversationRead(activeProfile.id, composeRecipient.id);
       const history = phoneConversationText(phoneConversationMessages(activeProfile.id, composeRecipient.id), composeHistoryPage);
       composeHistoryPage = history.page;
       composeHistoryText.setData(`\n${composeHistoryPage > 0 ? "ข้อความเก่า\n\n" : ""}${history.text}\n`);
@@ -1713,9 +1733,7 @@ async function showPhone(player, requestedAt = Date.now()) {
       if (!message || !activeProfile) return;
       selectedMessage = message;
 
-      const inbox = readPhoneInbox(activeProfile.id);
-      for (const entry of inbox) if (entry.senderPhoneId === message.senderPhoneId && entry.anonymous === message.anonymous) entry.read = true;
-      try { writePhoneInbox(activeProfile.id, inbox); } catch {}
+      try { markPhoneConversationRead(activeProfile.id, message.senderPhoneId, message.anonymous); } catch {}
       selectedMessage.read = true;
       detailHistoryPage = 0;
       refreshDetailHistory();
@@ -2816,5 +2834,5 @@ system.runInterval(() => {
 }, 100);
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.15.12 — separate pages + conversation history + notification privacy"
+  "[VCMumbleItem/BP] Loaded v2.15.13 — history colors + read receipts"
 );

@@ -26,3 +26,18 @@ ctx.writePhoneOutgoing('a',Array.from({length:100},(_,i)=>({...msg('large'+i,'a'
 assert.ok(Buffer.byteLength(properties.get('vcmphone:outgoing:a'),'utf8')<=28000);
 assert.ok(!source.includes('phoneChat(player, `เตรียมและส่งคำขอเปิด DDUI:'));
 console.log('PASS: legacy incoming/outgoing recovery, persistence, one thread per pair, anonymous isolation, paging and notification privacy.');
+ctx.writePhoneInbox=(id,m)=>inboxes.set(id,m);
+ctx.readPhoneProfile=id=>({id,number:id==='a'?'0001':'0002'});
+const sent=msg('receipt','a','check read receipt',100);
+inboxes.set('b',[sent]);inboxes.set('a',[]);
+ctx.writePhoneOutgoing('a',[{...sent,peerPhoneId:'b',peerNumber:'0002'}]);
+assert.match(ctx.phoneConversationText(ctx.phoneConversationMessages('a','b')).text,/ยังไม่อ่าน/);
+ctx.markPhoneConversationRead('b','a');
+assert.equal(inboxes.get('b')[0].read,true);
+assert.match(ctx.phoneConversationText(ctx.phoneConversationMessages('a','b')).text,/อ่านแล้ว/);
+inboxes.set('b',[]);
+assert.equal(ctx.phoneConversationMessages('a','b')[0].read,true);
+const colored=ctx.phoneConversationText(history).text;
+assert.match(colored,/§7[^]*body7/);assert.match(colored,/§f[^]*body11/);
+assert.doesNotMatch(ctx.phoneConversationText(history,2).text,/§f/);
+console.log('PASS: latest message white, old messages gray; actual recipient read persists after inbox deletion.');
