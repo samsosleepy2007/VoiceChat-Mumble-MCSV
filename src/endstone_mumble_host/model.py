@@ -14,7 +14,7 @@ class PlayerState:
     z: float
     yaw: float
     pitch: float
-    voice_enabled: bool = True
+    voice_enabled: bool = False
 
     def changed_from(
         self,

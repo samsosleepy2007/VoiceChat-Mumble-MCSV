@@ -1,8 +1,8 @@
 [tracking]
-interval_ticks = 2
+interval_ticks = 4
 position_epsilon = 0.05
 rotation_epsilon = 1.0
-heartbeat_seconds = 15
+heartbeat_seconds = 2
 
 [mumble]
 port = 18655
@@ -15,5 +15,5 @@ max_queue = 4096
 
 [voice]
 default_range = 30
-max_range = 150
+max_range = 60
 default_attenuation_level = 3

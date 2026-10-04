@@ -60,7 +60,7 @@ const DEFAULT_VOICE_RANGE = 30;
 const DEFAULT_MAX_RANGE = 150;
 const VOICE_RANGE_PREVIEW_PREFIX = "vcmumble:voice_range_preview_";
 const VOICE_RANGE_SLIDER_SETTLE_TICKS = 15;
-const VOICE_RANGE_CHANGE_COOLDOWN_TICKS = 20 * 30;
+const VOICE_RANGE_CHANGE_COOLDOWN_TICKS = 20 * 5;
 let rangeRequestSequence = 0;
 let attenuationRequestSequence = 0;
 const states = new Map();
@@ -410,6 +410,10 @@ function stateFor(player) {
   const effective = offMic || (mode === MODE_HOLD ? mainMic : latch);
   state = {
     mode,
+    micKnown: hasAnyMic(player),
+    appliedEffective: undefined,
+    publishedEffective: undefined,
+    lastPublishedTick: -100,
     lastMainMic: mainMic,
     toggleLatched: latch,
     effective,
@@ -419,14 +423,11 @@ function stateFor(player) {
 }
 
 function evaluate(player) {
-  migrateLegacyItems(player);
-  enforceSingleMic(player);
-  ensureMic(player);
-
+  // Keep inventory maintenance out of the per-tick path.
   const state = stateFor(player);
   const mainMic = isMicId(getMainId(player));
   const offMic = isMicId(getOffId(player));
-  const hasMic = hasAnyMic(player);
+  const hasMic = state.micKnown || mainMic || offMic;
   const mode = getMode(player);
 
   if (mode !== state.mode) {
@@ -463,8 +464,18 @@ function evaluate(player) {
     );
   }
 
-  replaceMicStatus(player, effective);
-  publishMicState(player, effective);
+  const wantedId = effective ? MIC_ON : MIC_OFF;
+  if (state.appliedEffective !== effective ||
+      (mainMic && getMainId(player) !== wantedId) ||
+      (offMic && getOffId(player) !== wantedId)) {
+    replaceMicStatus(player, effective);
+    state.appliedEffective = effective;
+  }
+  if (state.publishedEffective !== effective || system.currentTick - state.lastPublishedTick >= 100) {
+    publishMicState(player, effective);
+    state.publishedEffective = effective;
+    state.lastPublishedTick = system.currentTick;
+  }
   state.lastMainMic = mainMic;
 }
 
@@ -800,7 +811,7 @@ async function showPhone(player) {
   openPhonePlayers.add(player.id);
   try {
     const pageNames = [
-      "setupName", "setupNumber", "home", "sendMethod", "sendNumber", "contacts",
+      "setupName", "setupNumber", "home", "bank", "sendMethod", "sendNumber", "contacts",
       "addContact", "contactDetail", "deleteContact", "compose", "inbox", "messageDetail",
     ];
     const pages = Object.fromEntries(
@@ -824,6 +835,7 @@ async function showPhone(player) {
     const setupNameText = new ObservableString("");
     const identityText = new ObservableString("");
     const homeStatus = new ObservableString("");
+    const bankStatus = new ObservableString("");
 
     const directNumberInput = new ObservableString("", { clientWritable: true });
     const directNumberStatus = new ObservableString("");
@@ -1439,6 +1451,10 @@ async function showPhone(player) {
       .button("ส่งข้อความ", openSendMethod, { visible: pages.home })
       .button(inboxHomeButtonLabel, openInbox, { visible: pages.home })
       .button("โทร", () => homeStatus.setData("\nระบบโทรยังไม่ได้เปิดใช้งานในเวอร์ชันนี้\n"), { visible: pages.home })
+      .button("ธนาคาร", () => {
+        bankStatus.setData("");
+        showPage("bank");
+      }, { visible: pages.home })
       .button("ตั้งค่า", () => homeStatus.setData("\nApplication ตั้งค่าเตรียมไว้สำหรับพัฒนาต่อ\n"), { visible: pages.home })
       .spacer({ visible: pages.home })
       .header("Favorites", { visible: pages.home })
@@ -1451,6 +1467,13 @@ async function showPhone(player) {
     form
       .spacer({ visible: pages.home })
       .label(homeStatus, { visible: pages.home })
+
+      .header("ธนาคาร", { visible: pages.bank })
+      .label("\nเลขบัญชี: ยังไม่ได้เปิดบัญชี\n\nจำนวนเงิน: 0\n", { visible: pages.bank })
+      .button("โอนเงิน", () => bankStatus.setData("\nระบบโอนเงินเตรียมไว้สำหรับพัฒนาต่อ\n"), { visible: pages.bank })
+      .button("ทัชสแกน", () => bankStatus.setData("\nระบบทัชสแกนเตรียมไว้สำหรับพัฒนาต่อ\n"), { visible: pages.bank })
+      .label(bankStatus, { visible: pages.bank })
+      .button("ย้อนกลับ", openHome, { visible: pages.bank })
 
       .header("ส่งข้อความ", { visible: pages.sendMethod })
       .label("\nเลือกวิธีระบุผู้รับข้อความ\n", { visible: pages.sendMethod })
@@ -1896,21 +1919,30 @@ function showVoiceRangePreview(player, rawRadius) {
 
 const openSettingsPlayers = new Set();
 const openSettingsForms = new Map();
+const settingsRefreshJobs = new Map();
+const settingsReopenAfter = new Map();
+
+const pendingMicUiOpens = new Map();
+const micUiNoticeAfter = new Map();
+function notifyMicUiCooldown(player) {
+  if (system.currentTick < (micUiNoticeAfter.get(player.id) ?? 0)) return;
+  micUiNoticeAfter.set(player.id, system.currentTick + 40);
+  player.sendMessage("[ SleepyMic ] ติดคูลดาวน์การใช้ โปรดรอสักครู่และลองอีกครั้ง");
+}
 
 async function showSettings(player) {
-  if (openSettingsPlayers.has(player.id)) {
-    player.sendMessage("§e[VC Mumble] หน้าตั้งค่า Mic เปิดอยู่แล้ว§r");
+  const playerId = player.id;
+  if (openSettingsPlayers.has(playerId)) return;
+  if (voiceRangeCooldownTicks(player) > 0 || system.currentTick < (settingsReopenAfter.get(playerId) ?? 0)) {
+    notifyMicUiCooldown(player);
     return;
   }
-
-  openSettingsPlayers.add(player.id);
+  openSettingsPlayers.add(playerId);
+  console.warn(`[VCMumbleItem/BP] MIC_UI_OPEN player=${player.name} cooldown=${voiceRangeCooldownTicks(player)}`);
   let refreshId;
 
   try {
-    ensureMic(player);
-    evaluate(player);
-    syncVoiceRangeFromServer(player);
-
+    // Opening the UI only reads state; inventory and sync run independently.
     const initial = stateFor(player);
     const initialRange = currentVoiceRange(player);
     const initialMax = Math.max(1, currentMaxRange(player));
@@ -1923,15 +1955,11 @@ async function showSettings(player) {
     const rangeText = new ObservableString(
       `ระยะเสียงปัจจุบัน: §b${initialRange} บล็อก§r\n`
     );
-    const rangeConfirmText = new ObservableString(
-      "สถานะ Endstone: §eกำลังซิงก์ระยะเสียง...§r\n"
-    );
+    const rangeConfirmText = new ObservableString("สถานะ Endstone: ใช้ค่าปัจจุบัน\n");
     const attenuationText = new ObservableString(
       `เสียงตามระยะ: §d${attenuationLabel(initialAttenuation)} (ระดับ ${initialAttenuation})§r\n`
     );
-    const attenuationConfirmText = new ObservableString(
-      "สถานะ Distance Volume: §eกำลังซิงก์...§r\n"
-    );
+    const attenuationConfirmText = new ObservableString("สถานะ Distance Volume: ใช้ค่าปัจจุบัน\n");
     const offhandText = new ObservableString(
       isMicId(getOffId(player))
         ? "มือซ้าย: §aMic อยู่มือซ้าย — บังคับ ON§r\n"
@@ -1956,7 +1984,7 @@ async function showSettings(player) {
     const initialCooldownSeconds = voiceRangeCooldownSeconds(player);
     const cooldownStatusText = new ObservableString(
       initialCooldownSeconds > 0
-        ? `คูลดาวน์เปลี่ยนระยะ: §e${initialCooldownSeconds} วิ§r\n`
+        ? "คูลดาวน์เปลี่ยนระยะ: §eกำลังคูลดาวน์§r\n"
         : "คูลดาวน์เปลี่ยนระยะ: §aพร้อมเปลี่ยนได้§r\n"
     );
     let lastSliderRange = Math.floor(rangeSlider.getData());
@@ -1969,7 +1997,7 @@ async function showSettings(player) {
     let pendingRange = null;
     let pendingRequestId = "";
     let pendingChecks = 0;
-    let syncRequestId = requestVoiceRangeSync(player);
+    let syncRequestId = "";
     let syncChecks = 0;
     let nextPeriodicSyncTick = system.currentTick + 100;
 
@@ -1977,7 +2005,7 @@ async function showSettings(player) {
     let pendingAttenuation = null;
     let pendingAttenuationRequestId = "";
     let pendingAttenuationChecks = 0;
-    let attenuationSyncRequestId = requestAttenuationSync(player);
+    let attenuationSyncRequestId = "";
     let attenuationSyncChecks = 0;
     let nextAttenuationSyncTick = system.currentTick + 100;
 
@@ -1989,15 +2017,9 @@ async function showSettings(player) {
       }
 
       const cooldownTicks = voiceRangeCooldownTicks(player);
-      if (cooldownTicks > 0) {
-        const cooldownSeconds = Math.ceil(cooldownTicks / 20);
-        queuedSliderRange = value;
-        sliderCommitDueTick = system.currentTick + cooldownTicks;
-        setObservableIfChanged(customRange, String(value));
-        setObservableIfChanged(
-          rangeConfirmText,
-          `สถานะ Endstone: §eคูลดาวน์ ${cooldownSeconds} วิ • รอใช้ ${value} บล็อก§r\n`
-        );
+      if (cooldownTicks > 0 || pendingRequestId) {
+        queuedSliderRange = null;
+        sliderCandidateRange = null;
         return;
       }
 
@@ -2009,6 +2031,7 @@ async function showSettings(player) {
 
       pendingRange = value;
       pendingRequestId = requestId;
+      rangeControlsVisible.setData(false);
       pendingChecks = 0;
       syncRequestId = "";
       syncChecks = 0;
@@ -2031,7 +2054,7 @@ async function showSettings(player) {
 
       lastSliderRange = value;
       rangeSlider.setData(value);
-      showVoiceRangePreview(player, value);
+      // Range preview disabled; keep the realtime range request.
 
       // Repeated taps on the same quick button must not create duplicate
       // requests. If a request is pending, retain only the newest value.
@@ -2042,11 +2065,7 @@ async function showSettings(player) {
         );
         return;
       }
-      if (pendingRequestId) {
-        queuedSliderRange = value;
-        sliderCommitDueTick = system.currentTick;
-        return;
-      }
+      if (pendingRequestId) return;
 
       queuedSliderRange = null;
       sliderCommitDueTick = 0;
@@ -2081,40 +2100,45 @@ async function showSettings(player) {
     };
 
     const mainPageVisible = new ObservableBoolean(true);
+    const rangeControlsVisible = new ObservableBoolean(initialCooldownSeconds <= 0);
     const settingsPageVisible = new ObservableBoolean(false);
+    const resetVisible = new ObservableBoolean(false);
     const showMainPage = () => {
       mainPageVisible.setData(true);
       settingsPageVisible.setData(false);
+      resetVisible.setData(false);
+      rangeControlsVisible.setData(voiceRangeCooldownTicks(player) <= 0 && !pendingRequestId);
     };
     const showSettingsPage = () => {
       mainPageVisible.setData(false);
       settingsPageVisible.setData(true);
+      resetVisible.setData(voiceRangeCooldownTicks(player) <= 0 && !pendingRequestId);
+      rangeControlsVisible.setData(false);
     };
 
     const form = new CustomForm(player, "VC Mumble • Mic Settings")
       .header("สถานะ", { visible: mainPageVisible })
       .label(modeText, { visible: mainPageVisible })
       .label(rangeText, { visible: mainPageVisible })
-      .label(cooldownStatusText, { visible: mainPageVisible })
       .label(serverLimitText, { visible: mainPageVisible })
       .spacer({ visible: mainPageVisible })
       .divider({ visible: mainPageVisible })
       .header("Voice Range", { visible: mainPageVisible })
       .button("10 บล็อก", () => submitQuickRange(10), {
-        visible: mainPageVisible,
+        visible: rangeControlsVisible,
       })
       .button("20 บล็อก", () => submitQuickRange(20), {
-        visible: mainPageVisible,
+        visible: rangeControlsVisible,
       })
       .button("30 บล็อก", () => submitQuickRange(30), {
-        visible: mainPageVisible,
+        visible: rangeControlsVisible,
       })
       .spacer({ visible: mainPageVisible })
       .slider("ระยะเสียงแบบ Slider", rangeSlider, 1, sliderMax, {
         step: 1,
-        visible: mainPageVisible,
+        visible: rangeControlsVisible,
         description:
-          "ลากแล้วปล่อย • เมื่อหยุดประมาณ 0.75 วิ จะแสดง Preview และใช้ค่าล่าสุดครั้งเดียว • คูลดาวน์ 30 วิ",
+          "ลากแล้วปล่อย เมื่อหยุดประมาณ 0.75 วิ จะใช้ระยะที่เลือกและปิดหน้าจอ",
       })
       .spacer({ visible: mainPageVisible })
       .button("ตั้งค่า", showSettingsPage, {
@@ -2163,6 +2187,9 @@ async function showSettings(player) {
         visible: settingsPageVisible,
       })
       .button("คืนค่าเริ่มต้น", () => {
+        if (voiceRangeCooldownTicks(player) > 0 || pendingRequestId) return;
+        queuedSliderRange = null;
+        sliderCandidateRange = null;
         const resetRange = isOperator(player) ? 30 : Math.min(30, sliderMax.getData());
         customRange.setData(String(resetRange));
         lastSliderRange = Math.min(resetRange, sliderMax.getData());
@@ -2176,7 +2203,8 @@ async function showSettings(player) {
           toggleDisabled
         );
         submitRange(resetRange);
-      }, { visible: settingsPageVisible })
+        resetVisible.setData(false);
+      }, { visible: resetVisible })
       .spacer({ visible: settingsPageVisible })
       .button("กลับหน้าหลัก", showMainPage, {
         visible: settingsPageVisible,
@@ -2185,285 +2213,100 @@ async function showSettings(player) {
 
     openSettingsForms.set(player.id, form);
 
+    // Only read the slider and check the user's pending request.
+    // No periodic sync or realtime status writes to DDUI.
     refreshId = system.runInterval(() => {
       try {
-        const refreshed = stateFor(player);
-        const nextMax = Math.max(1, currentMaxRange(player));
-
-        setObservableIfChanged(
-          modeText,
-          `โหมด: §e${modeUiLabel(refreshed.mode)}§r\n`
-        );
-        setObservableIfChanged(
-          rangeText,
-          `ระยะเสียงปัจจุบัน: §b${confirmedRange} บล็อก§r\n`
-        );
-        const cooldownSeconds = voiceRangeCooldownSeconds(player);
-        setObservableIfChanged(
-          cooldownStatusText,
-          cooldownSeconds > 0
-            ? `คูลดาวน์เปลี่ยนระยะ: §e${cooldownSeconds} วิ§r\n`
-            : "คูลดาวน์เปลี่ยนระยะ: §aพร้อมเปลี่ยนได้§r\n"
-        );
-        setObservableIfChanged(
-          serverLimitText,
-          isOperator(player)
-            ? `สิทธิ์: §dOperator — ระยะสูงสุด ${nextMax} บล็อก§r\n`
-            : `ระยะสูงสุด: §b${nextMax} บล็อก§r\n`
-        );
-        setObservableIfChanged(holdDisabled, refreshed.mode === MODE_HOLD);
-        setObservableIfChanged(toggleDisabled, refreshed.mode === MODE_TOGGLE);
-
-        setObservableIfChanged(sliderMax, nextMax);
-        if (rangeSlider.getData() > nextMax && !isOperator(player)) {
-          lastSliderRange = nextMax;
-          rangeSlider.setData(nextMax);
-        }
-
-        const sliderValue = Math.max(
-          1,
-          Math.min(Math.floor(rangeSlider.getData()), nextMax)
-        );
-        if (sliderValue !== lastSliderRange) {
-          // While the finger is moving, only remember the newest value.
-          // No particle preview, Endstone request, tag ACK, or DDUI status write
-          // happens here. The value is processed once after the slider settles.
-          lastSliderRange = sliderValue;
-          sliderCandidateRange = sliderValue;
-          sliderSettleDueTick =
-            system.currentTick + VOICE_RANGE_SLIDER_SETTLE_TICKS;
-        }
-
-        if (
-          sliderCandidateRange !== null &&
-          system.currentTick >= sliderSettleDueTick
-        ) {
-          const settledValue = sliderCandidateRange;
-          sliderCandidateRange = null;
-          showVoiceRangePreview(player, settledValue);
-
-          if (!pendingRequestId && settledValue === confirmedRange) {
-            queuedSliderRange = null;
-            setObservableIfChanged(
-              rangeConfirmText,
-              `สถานะ Endstone: §aใช้อยู่แล้ว — ${confirmedRange} บล็อก§r\n`
-            );
-          } else {
-            queuedSliderRange = settledValue;
-            sliderCommitDueTick = system.currentTick;
-          }
-        }
-
-        if (
-          queuedSliderRange !== null &&
-          !pendingRequestId &&
-          system.currentTick >= sliderCommitDueTick
-        ) {
-          const valueToCommit = queuedSliderRange;
-          queuedSliderRange = null;
-          submitRange(valueToCommit);
-        }
-
+        if (!player.isValid) return;
         if (pendingRequestId) {
           const ack = consumeVoiceRangeAck(player, pendingRequestId);
           const snapshot = serverVoiceRangeSnapshot(player);
-          const implicitAck =
-            !ack &&
-            snapshot.available &&
-            pendingRange !== null &&
-            snapshot.value === pendingRange;
-
-          if (ack || implicitAck) {
-            const acceptedValue = ack?.value ?? snapshot.value;
-            if (acceptedValue >= 1) {
-              confirmedRange = acceptedValue;
-              player.setDynamicProperty(PROP_VOICE_RANGE, confirmedRange);
-              customRange.setData(String(confirmedRange));
-              if (
-                queuedSliderRange === null &&
-                confirmedRange <= nextMax
-              ) {
-                lastSliderRange = confirmedRange;
-                rangeSlider.setData(confirmedRange);
-              }
-            }
-
-            if (implicitAck || (ack?.status === "ok" && acceptedValue === pendingRange)) {
-              startVoiceRangeCooldown(player);
-              rangeConfirmText.setData(
-                `สถานะ Endstone: §aยืนยันแล้ว — ${acceptedValue} บล็อก • คูลดาวน์ 30 วิ${implicitAck ? " (server sync)" : ""}§r\n`
-              );
-            } else {
-              rangeConfirmText.setData(
-                `สถานะ Endstone: §cไม่รับค่าที่ขอ — ใช้ ${confirmedRange} บล็อก§r\n`
-              );
-            }
-
-            pendingRange = null;
+          const accepted = ack
+            ? ack.status === "ok" && ack.value === pendingRange
+            : snapshot.available && snapshot.value === pendingRange;
+          if (accepted) {
+            const value = ack?.value ?? snapshot.value;
             pendingRequestId = "";
-            pendingChecks = 0;
-            nextPeriodicSyncTick = system.currentTick + 100;
-          } else {
-            pendingChecks++;
-            if (pendingChecks >= 40) {
-              if (snapshot.available) {
-                rangeConfirmText.setData(
-                  `สถานะ Endstone: §6ยังไม่ได้ ACK — server ยังรายงาน ${snapshot.value} บล็อก§r\n`
-                );
-              } else {
-                rangeConfirmText.setData(
-                  "สถานะ Endstone: §cไม่พบ range/ACK contract\n\nต้องใช้ VC Mumble Endstone v0.3.0+§r\n"
-                );
-              }
-            }
+            pendingRange = null;
+            player.setDynamicProperty(PROP_VOICE_RANGE, value);
+            startVoiceRangeCooldown(player);
+            player.sendMessage(`[ SleepyMic ] เปลี่ยนระยะเป็น ${value} บล็อกแล้ว`);
+            system.clearRun(refreshId);
+            refreshId = undefined;
+            settingsRefreshJobs.delete(playerId);
+            form.close();
+            return;
           }
-        } else {
-          if (!syncRequestId && system.currentTick >= nextPeriodicSyncTick) {
-            syncRequestId = requestVoiceRangeSync(player);
-            syncChecks = 0;
-            nextPeriodicSyncTick = system.currentTick + 100;
+          pendingChecks++;
+          if (ack || pendingChecks >= 40) {
+            pendingRequestId = "";
+            pendingRange = null;
+            player.sendMessage("[ SleepyMic ] เปลี่ยนระยะไม่สำเร็จ โปรดลองอีกครั้ง");
+            system.clearRun(refreshId);
+            refreshId = undefined;
+            settingsRefreshJobs.delete(playerId);
+            form.close();
           }
-
-          if (syncRequestId) {
-            const syncAck = consumeVoiceRangeAck(player, syncRequestId);
-            const syncSnapshot = serverVoiceRangeSnapshot(player);
-            if (syncAck || syncSnapshot.available) {
-              const syncValue = syncAck?.value ?? syncSnapshot.value;
-              if (syncValue >= 1) {
-                confirmedRange = syncValue;
-                player.setDynamicProperty(PROP_VOICE_RANGE, confirmedRange);
-                customRange.setData(String(confirmedRange));
-                if (
-                  queuedSliderRange === null &&
-                  confirmedRange <= nextMax
-                ) {
-                  lastSliderRange = confirmedRange;
-                  rangeSlider.setData(confirmedRange);
-                }
-              }
-              rangeConfirmText.setData(
-                `สถานะ Endstone: §aเชื่อมต่อแล้ว — ${confirmedRange} บล็อก§r\n`
-              );
-              syncRequestId = "";
-              syncChecks = 0;
-              nextPeriodicSyncTick = system.currentTick + 100;
-            } else {
-              syncChecks++;
-              if (syncChecks >= 40) {
-                rangeConfirmText.setData(
-                  "สถานะ Endstone: §cไม่พบ v0.3.0 range contract\n\nตรวจสอบ/อัปเดต Endstone plugin§r\n"
-                );
-                syncRequestId = "";
-                syncChecks = 0;
-                nextPeriodicSyncTick = system.currentTick + 100;
-              }
-            }
-          }
+          return;
         }
-
-        if (pendingAttenuationRequestId) {
-          const ack = consumeAttenuationAck(player, pendingAttenuationRequestId);
-          const snapshot = serverAttenuationSnapshot(player);
-          const implicitAck =
-            !ack &&
-            snapshot.available &&
-            pendingAttenuation !== null &&
-            snapshot.value === pendingAttenuation;
-
-          if (ack || implicitAck) {
-            const acceptedLevel = ack?.value ?? snapshot.value;
-            if (acceptedLevel >= 0 && acceptedLevel <= 4) {
-              confirmedAttenuation = acceptedLevel;
-            }
-
-            if (
-              implicitAck ||
-              (ack?.status === "ok" && acceptedLevel === pendingAttenuation)
-            ) {
-              attenuationConfirmText.setData(
-                `สถานะ Distance Volume: §aยืนยันแล้ว — ${attenuationLabel(acceptedLevel)} (ระดับ ${acceptedLevel})§r\n`
-              );
-            } else {
-              attenuationConfirmText.setData(
-                `สถานะ Distance Volume: §cไม่รับค่าที่ขอ — ใช้ ${attenuationLabel(confirmedAttenuation)}§r\n`
-              );
-            }
-
-            pendingAttenuation = null;
-            pendingAttenuationRequestId = "";
-            pendingAttenuationChecks = 0;
-            nextAttenuationSyncTick = system.currentTick + 100;
-          } else {
-            pendingAttenuationChecks++;
-            if (pendingAttenuationChecks >= 40) {
-              attenuationConfirmText.setData(
-                snapshot.available
-                  ? `สถานะ Distance Volume: §6ยังไม่ได้ ACK — server ยังรายงานระดับ ${snapshot.value}§r\n`
-                  : "สถานะ Distance Volume: §cไม่พบ attenuation contract — ต้องใช้ VC Mumble Endstone v0.4.2+§r\n"
-              );
-            }
-          }
-        } else {
-          if (
-            !attenuationSyncRequestId &&
-            system.currentTick >= nextAttenuationSyncTick
-          ) {
-            attenuationSyncRequestId = requestAttenuationSync(player);
-            attenuationSyncChecks = 0;
-            nextAttenuationSyncTick = system.currentTick + 100;
-          }
-
-          if (attenuationSyncRequestId) {
-            const syncAck = consumeAttenuationAck(
-              player,
-              attenuationSyncRequestId
-            );
-            const snapshot = serverAttenuationSnapshot(player);
-
-            if (syncAck || snapshot.available) {
-              const syncLevel = syncAck?.value ?? snapshot.value;
-              if (syncLevel >= 0 && syncLevel <= 4) {
-                confirmedAttenuation = syncLevel;
-              }
-              attenuationConfirmText.setData(
-                `สถานะ Distance Volume: §aเชื่อมต่อแล้ว — ${attenuationLabel(confirmedAttenuation)} (ระดับ ${confirmedAttenuation})§r\n`
-              );
-              attenuationSyncRequestId = "";
-              attenuationSyncChecks = 0;
-              nextAttenuationSyncTick = system.currentTick + 100;
-            } else {
-              attenuationSyncChecks++;
-              if (attenuationSyncChecks >= 40) {
-                attenuationConfirmText.setData(
-                  "สถานะ Distance Volume: §cไม่พบ attenuation contract — ตรวจสอบ VC Mumble Endstone v0.4.2+§r\n"
-                );
-                attenuationSyncRequestId = "";
-                attenuationSyncChecks = 0;
-                nextAttenuationSyncTick = system.currentTick + 100;
-              }
-            }
-          }
+        if (!mainPageVisible.getData() || !rangeControlsVisible.getData()) return;
+        const value = Math.max(1, Math.min(Math.floor(rangeSlider.getData()), sliderMax.getData()));
+        if (value !== lastSliderRange) {
+          lastSliderRange = value;
+          sliderCandidateRange = value;
+          sliderSettleDueTick = system.currentTick + VOICE_RANGE_SLIDER_SETTLE_TICKS;
+          return;
         }
-      } catch (e) {
-        console.warn(
-          `[VCMumbleItem/BP] settings refresh failed player=${player.name}: ${e}`
-        );
+        if (sliderCandidateRange !== null && system.currentTick >= sliderSettleDueTick) {
+          const settled = sliderCandidateRange;
+          sliderCandidateRange = null;
+          if (settled !== confirmedRange) submitRange(settled);
+        }
+      } catch (error) {
+        console.warn(`[VCMumbleItem/BP] MIC_UI_MONITOR_FAILED player=${playerId}: ${error}`);
       }
     }, 5);
+    settingsRefreshJobs.set(playerId, refreshId);
 
     await form.show();
   } catch (e) {
     console.warn(`[VCMumbleItem/BP] DDUI form failed player=${player.name}: ${e}`);
   } finally {
     if (refreshId !== undefined) system.clearRun(refreshId);
-    openSettingsForms.delete(player.id);
-    openSettingsPlayers.delete(player.id);
+    settingsRefreshJobs.delete(playerId);
+    settingsReopenAfter.set(playerId, system.currentTick + 100);
+    console.warn(`[VCMumbleItem/BP] MIC_UI_CLOSE player=${playerId} reopen_delay_ticks=100`);
+    openSettingsForms.delete(playerId);
+    openSettingsPlayers.delete(playerId);
   }
 }
 
 function handleMicUse(player) {
   if (!player) return;
-  system.run(() => showSettings(player));
+  const id = player.id;
+  if (pendingMicUiOpens.has(id) || openSettingsPlayers.has(id)) return;
+  if (voiceRangeCooldownTicks(player) > 0 || system.currentTick < (settingsReopenAfter.get(id) ?? 0)) {
+    notifyMicUiCooldown(player);
+    return;
+  }
+  const token = {};
+  pendingMicUiOpens.set(id, token);
+  try {
+    system.run(async () => {
+      try {
+        if (pendingMicUiOpens.get(id) !== token) return;
+        if (!player.isValid) return;
+        await showSettings(player);
+      } catch (error) {
+        console.warn(`[VCMumbleItem/BP] MIC_UI_OPEN_FAILED player=${id}: ${error}`);
+      } finally {
+        if (pendingMicUiOpens.get(id) === token) pendingMicUiOpens.delete(id);
+      }
+    });
+  } catch (error) {
+    if (pendingMicUiOpens.get(id) === token) pendingMicUiOpens.delete(id);
+    console.warn(`[VCMumbleItem/BP] MIC_UI_SCHEDULE_FAILED player=${id}: ${error}`);
+  }
 }
 
 system.beforeEvents.startup.subscribe((ev) => {
@@ -2503,6 +2346,12 @@ world.afterEvents.playerSpawn.subscribe((ev) => {
 
 world.afterEvents.playerLeave.subscribe((ev) => {
   states.delete(ev.playerId);
+  const refreshJob = settingsRefreshJobs.get(ev.playerId);
+  if (refreshJob !== undefined) system.clearRun(refreshJob);
+  settingsRefreshJobs.delete(ev.playerId);
+  settingsReopenAfter.delete(ev.playerId);
+  pendingMicUiOpens.delete(ev.playerId);
+  micUiNoticeAfter.delete(ev.playerId);
   openSettingsPlayers.delete(ev.playerId);
   openSettingsForms.delete(ev.playerId);
   openPhonePlayers.delete(ev.playerId);
@@ -2523,14 +2372,17 @@ system.runInterval(() => {
 system.runInterval(() => {
   for (const player of world.getAllPlayers()) {
     try {
+      migrateLegacyItems(player);
       ensureMic(player);
       reassertMicFlags(player);
       syncVoiceRangeFromServer(player);
-      publishMicState(player, stateFor(player).effective);
+      const state = stateFor(player);
+      state.micKnown = hasAnyMic(player);
+      evaluate(player);
     } catch {}
   }
-}, 40);
+}, 100);
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.15.0 — SleepyPhone Home Favorites + unread badges + contact aliases"
+  "[VCMumbleItem/BP] Loaded v2.15.7 — Mic DDUI open guard + slider confirmation"
 );

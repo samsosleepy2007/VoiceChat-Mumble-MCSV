@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - experiment/unified-itemmic-proximity-v0.4.0
+      - experiment/unified-itemmic-proximity-v0.5.3
   pull_request:
   workflow_dispatch:
 
@@ -21,26 +21,6 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Reuse verified VC proximity binary from v0.3.0
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p /tmp/mumblehost-v03 src/endstone_mumble_host/bin
-          gh release download v0.3.0 \
-            --repo "${{ github.repository }}" \
-            --pattern "endstone_mumble_host-0.3.0-py3-none-any.whl" \
-            --dir /tmp/mumblehost-v03
-          python - <<'PY'
-          import pathlib, zipfile
-          wheel = next(pathlib.Path("/tmp/mumblehost-v03").glob("*.whl"))
-          target = pathlib.Path("src/endstone_mumble_host/bin/mumble-server-vc")
-          with zipfile.ZipFile(wheel) as zf:
-              target.write_bytes(zf.read("endstone_mumble_host/bin/mumble-server-vc"))
-          target.chmod(0o755)
-          print(target, target.stat().st_size)
-          PY
-          test -s src/endstone_mumble_host/bin/mumble-server-vc
-
       - name: Compile and test unified plugin
         run: |
           python -m compileall -q src
@@ -56,7 +36,7 @@ jobs:
         run: |
           python - <<'PY'
           import pathlib, zipfile
-          wheel = next(pathlib.Path("dist").glob("endstone_mumble_host-0.4.0-*.whl"))
+          wheel = next(pathlib.Path("dist").glob("endstone_mumble_host-0.5.3-*.whl"))
           with zipfile.ZipFile(wheel) as zf:
               names = set(zf.namelist())
           required = {
@@ -77,6 +57,6 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: mumble-host-unified-v0.4.0
+          name: mumble-host-unified-v0.5.3
           path: dist/*.whl
           retention-days: 14

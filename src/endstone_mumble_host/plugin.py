@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+from concurrent.futures import ThreadPoolExecutor
 import math
 import threading
 import time
@@ -28,15 +30,15 @@ ATTENUATION_LEVELS: dict[int, str] = {
 
 class MumbleHost(Plugin):
     prefix = "MumbleHost"
-    version = "0.4.0"
+    version = "0.5.3"
     api_version = "0.11"
-    description = "Unified MCSV Mumble server + Item Mic proximity routing"
+    description = "Unified MCSV Mumble server + Item Mic proximity + SleepyPhone call routing"
     authors = ["SamSoSleepy"]
 
     commands = {
         "vcb": {
             "description": "Open MumbleHost proximity status",
-            "usages": ["/vcb"],
+            "usages": ["/vcb [action: string]"],
             "permissions": ["mumble_host.command.user"],
         },
     }
@@ -56,6 +58,9 @@ class MumbleHost(Plugin):
         super().__init__()
         self._states: dict[str, PlayerState] = {}
         self._bindings: dict[str, dict[str, Any]] = {}
+        self._calls: dict[str, dict[str, Any]] = {}
+        # Move persistent writes out of the Endstone world tick.
+        self._binding_writer: ThreadPoolExecutor | None = None
         self._host: MumbleRuntimeHost | None = None
         self._state_sink: LocalStateSink | None = None
 
@@ -73,6 +78,13 @@ class MumbleHost(Plugin):
         self._last_host_running = False
 
     def on_enable(self) -> None:
+        # Endstone may enable the same instance after disable. A shutdown
+        # executor cannot accept new range writes; recreate it on enable.
+        if self._binding_writer is None:
+            self._binding_writer = ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="SleepyBindings"
+            )
+        self._install_performance_monitor()
         self.save_default_config()
         self._load_settings()
         self._load_bindings()
@@ -108,6 +120,15 @@ class MumbleHost(Plugin):
             self.server.scheduler.cancel_tasks(self)
         except Exception:
             pass
+        writer = self._binding_writer
+        self._binding_writer = None
+        if writer is not None:
+            try:
+                # Drain the small ordered binding queue before another
+                # instance/re-enable can replace bindings.json.
+                writer.shutdown(wait=True, cancel_futures=False)
+            except Exception as exc:
+                self.logger.warning(f"Could not finish binding writer: {exc}")
 
         sink = self._state_sink
         self._state_sink = None
@@ -121,6 +142,7 @@ class MumbleHost(Plugin):
 
         self._save_bindings()
         self._states.clear()
+        self._calls.clear()
         self.logger.info("MumbleHost Unified disabled")
 
     def _load_settings(self) -> None:
@@ -224,16 +246,25 @@ class MumbleHost(Plugin):
             )
 
     def _save_bindings(self) -> None:
+        # Snapshot while on main thread; write asynchronously in commit order.
+        payload = json.dumps(self._bindings, ensure_ascii=False, indent=2)
+        path = self.data_folder / "bindings.json"
+        writer = self._binding_writer
+        if writer is None:
+            self.logger.warning("Binding update ignored: plugin is disabled")
+            return
         try:
-            path = self.data_folder / "bindings.json"
-            path.write_text(
-                json.dumps(self._bindings, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
+            writer.submit(self._write_bindings_file, path, payload)
+        except RuntimeError as exc:
+            self.logger.warning(f"Could not queue range storage update: {exc}")
+
+    def _write_bindings_file(self, path: Any, payload: str) -> None:
+        try:
+            temporary = path.with_suffix(".json.tmp")
+            temporary.write_text(payload, encoding="utf-8")
+            os.replace(temporary, path)
         except Exception as exc:
-            self.logger.warning(
-                f"Could not save bindings.json: {type(exc).__name__}: {exc}"
-            )
+            self.logger.warning(f"Could not save bindings.json: {type(exc).__name__}: {exc}")
 
     def on_command(
         self,
@@ -243,6 +274,13 @@ class MumbleHost(Plugin):
     ) -> bool:
         if command.name != "vcb":
             return False
+        if args and args[0].lower() == "perf":
+            if isinstance(sender, Player) and not sender.has_permission("mumble_host.command.admin"):
+                sender.send_error_message("You do not have permission.")
+                return True
+            for line in self._performance_lines():
+                sender.send_message(line)
+            return True
         if isinstance(sender, Player):
             self._show_main_menu(sender)
         else:
@@ -253,6 +291,60 @@ class MumbleHost(Plugin):
                 f"attenuation={self._default_attenuation_level}"
             )
         return True
+
+    def _install_performance_monitor(self) -> None:
+        # Install once: Endstone can disable and re-enable the same instance.
+        self._perf_stats = {}
+        self._perf_started = time.perf_counter()
+        self._perf_last_log = self._perf_started
+        if getattr(self, "_perf_installed", False):
+            return
+        self._perf_installed = True
+        for method, label in (
+            ("_process_addon_controls", "range_controls"),
+            ("_snapshot_if_valid", "player_snapshot"),
+            ("_sync_call_sessions", "phone_calls"),
+            ("_tracking_tick", "tracking_total"),
+        ):
+            original = getattr(self, method)
+            def measured(*args, _original=original, _label=label, **kwargs):
+                wall_start = time.perf_counter()
+                cpu_start = time.thread_time()
+                try:
+                    return _original(*args, **kwargs)
+                finally:
+                    cpu_ms = (time.thread_time() - cpu_start) * 1000.0
+                    wall_ms = (time.perf_counter() - wall_start) * 1000.0
+                    row = self._perf_stats.setdefault(_label, [0, 0.0, 0.0, 0.0])
+                    row[0] += 1
+                    row[1] += cpu_ms
+                    row[2] += wall_ms
+                    row[3] = max(row[3], wall_ms)
+                    if _label == "tracking_total" and time.perf_counter() - self._perf_last_log >= 30:
+                        for line in self._performance_lines():
+                            self.logger.info(line)
+                        self._perf_stats.clear()
+                        self._perf_started = time.perf_counter()
+                        self._perf_last_log = self._perf_started
+            setattr(self, method, measured)
+
+    def _performance_lines(self) -> list[str]:
+        window = max(0.001, time.perf_counter() - self._perf_started)
+        lines = [f"VC_PERF window_s={window:.1f} scope=MumbleHost-main-thread cpu=thread-time wall=elapsed"]
+        # tracking_total contains the subcategories; do not sum it with them.
+        rows = sorted(
+            ((name, row) for name, row in self._perf_stats.items() if name != "tracking_total"),
+            key=lambda entry: entry[1][1], reverse=True,
+        )
+        if "tracking_total" in self._perf_stats:
+            rows.append(("tracking_total", self._perf_stats["tracking_total"]))
+        for name, (count, cpu_ms, wall_ms, max_ms) in rows:
+            lines.append(
+                f"VC_PERF part={name} calls={count} cpu_ms={cpu_ms:.3f} "
+                f"wall_ms={wall_ms:.3f} avg_wall_ms={wall_ms / max(1, count):.3f} "
+                f"max_wall_ms={max_ms:.3f} one_core_pct={cpu_ms / (window * 10):.3f}"
+            )
+        return lines
 
     def _host_state_label(self) -> str:
         host = self._host
@@ -332,6 +424,7 @@ class MumbleHost(Plugin):
         })
 
     def _tracking_tick(self) -> None:
+        tick_started = time.perf_counter()
         current_keys: set[str] = set()
 
         for player in self.server.online_players:
@@ -341,9 +434,28 @@ class MumbleHost(Plugin):
             addon_changed = self._process_addon_controls(player)
             state = self._snapshot_if_valid(player)
             if state is None:
+                # Never keep routing with a previously ON cached state when
+                # Minecraft can no longer provide a valid fresh snapshot.
+                previous = self._states.pop(key, None)
+                if previous is not None:
+                    self._state_send({
+                        "type": "player_leave",
+                        "name": previous.name,
+                        "xuid": previous.xuid,
+                        "uuid": previous.uuid,
+                        "mumbleName": previous.name,
+                    })
+                    self.logger.warning(
+                        f"STATE_INVALID player={player.name} action=fail-closed"
+                    )
                 continue
 
             previous = self._states.get(key)
+            if previous is None or state.voice_enabled != previous.voice_enabled:
+                self.logger.info(
+                    f"MIC_STATE player={state.name} "
+                    f"endstone={'ON' if state.voice_enabled else 'OFF'}"
+                )
             if (
                 addon_changed
                 or previous is None
@@ -366,6 +478,8 @@ class MumbleHost(Plugin):
                 "mumbleName": stale.name,
             })
 
+        self._sync_call_sessions()
+
         host_running = self._host.running if self._host is not None else False
         if host_running and not self._last_host_running:
             self._send_full_snapshot()
@@ -383,12 +497,79 @@ class MumbleHost(Plugin):
                 "tracked": len(self._states),
                 "ts": int(time.time() * 1000),
             })
+        elapsed_ms = (time.perf_counter() - tick_started) * 1000.0
+        if elapsed_ms > 35.0:
+            self.logger.warning(
+                f"TRACKING_SLOW duration_ms={elapsed_ms:.2f} "
+                f"players={len(current_keys)} calls={len(self._calls)}"
+            )
 
     def _send_full_snapshot(self) -> None:
         self._state_send({"type": "sync_begin", "count": len(self._states)})
         for key, state in self._states.items():
             self._state_send(self._state_message(key, state))
+        for call in self._calls.values():
+            self._state_send(call)
         self._state_send({"type": "sync_end", "count": len(self._states)})
+
+    def _collect_call_sessions(self) -> dict[str, dict[str, Any]]:
+        prefix = "vcmumble.call.active."
+        pending: dict[str, dict[str, tuple[str, bool]]] = {}
+
+        for player in self.server.online_players:
+            try:
+                tags = list(player.scoreboard_tags)
+            except Exception:
+                continue
+
+            for tag in tags:
+                if not tag.startswith(prefix):
+                    continue
+                payload = tag[len(prefix):]
+                parts = payload.rsplit(".", 2)
+                if len(parts) != 3:
+                    continue
+                call_id, role, speaker_raw = parts
+                call_id = call_id.strip()
+                role = role.strip().lower()
+                if not call_id or role not in {"a", "b"}:
+                    continue
+                speaker = speaker_raw.strip() == "1"
+                pending.setdefault(call_id, {})[role] = (str(player.name), speaker)
+
+        sessions: dict[str, dict[str, Any]] = {}
+        for call_id, roles in pending.items():
+            party_a = roles.get("a")
+            party_b = roles.get("b")
+            if party_a is None or party_b is None:
+                continue
+            if party_a[0].casefold() == party_b[0].casefold():
+                continue
+            sessions[call_id] = {
+                "type": "call_state",
+                "callId": call_id,
+                "partyA": party_a[0],
+                "partyB": party_b[0],
+                "speakerA": bool(party_a[1]),
+                "speakerB": bool(party_b[1]),
+            }
+        return sessions
+
+    def _sync_call_sessions(self) -> None:
+        current = self._collect_call_sessions()
+
+        for call_id, payload in current.items():
+            previous = self._calls.get(call_id)
+            if previous != payload:
+                self._state_send(payload)
+
+        for call_id in set(self._calls).difference(current):
+            self._state_send({
+                "type": "call_end",
+                "callId": call_id,
+            })
+
+        self._calls = current
 
     def _broadcast_current_player(self, player: Player) -> None:
         state = self._snapshot_if_valid(player)
@@ -486,7 +667,10 @@ class MumbleHost(Plugin):
             if tag.startswith("vcmumble.vr.request."):
                 payload = tag[len("vcmumble.vr.request."):]
                 request_id, separator, raw_value = payload.rpartition(".")
+                started_at = time.perf_counter()
+                self.logger.info(f"RANGE_BEGIN player={player.name} id={request_id}")
                 self._remove_player_tag(player, tag)
+                removed_at = time.perf_counter()
 
                 status = "error"
                 try:
@@ -503,12 +687,27 @@ class MumbleHost(Plugin):
                         current_range = requested
                         changed = True
 
+                stored_at = time.perf_counter()
                 self._publish_addon_range_tags(player, current_range, maximum)
+                published_at = time.perf_counter()
                 if request_id:
                     self._add_player_tag(
                         player,
                         f"vcmumble.vr.ack.{request_id}.{status}.{current_range}",
                     )
+                done_at = time.perf_counter()
+                elapsed_ms = (done_at - started_at) * 1000.0
+                self.logger.info(
+                    f"RANGE_ACK player={player.name} id={request_id} "
+                    f"requested={requested} actual={current_range} "
+                    f"status={status} duration_ms={elapsed_ms:.2f} "
+                    f"remove_ms={(removed_at-started_at)*1000:.2f} "
+                    f"parse_store_ms={(stored_at-removed_at)*1000:.2f} "
+                    f"publish_ms={(published_at-stored_at)*1000:.2f} "
+                    f"ack_ms={(done_at-published_at)*1000:.2f}"
+                )
+                if elapsed_ms > 35.0:
+                    self.logger.warning(f"RANGE_SLOW duration_ms={elapsed_ms:.2f}")
                 continue
 
             if tag.startswith("vcmumble.attn.sync."):
@@ -608,20 +807,12 @@ class MumbleHost(Plugin):
     def _voice_enabled_for(player: Player) -> bool:
         try:
             tags = set(player.scoreboard_tags)
-            has_on = "vcmumble.mic.on" in tags
-            has_off = "vcmumble.mic.off" in tags
-            if has_on:
-                if has_off:
-                    try:
-                        player.remove_scoreboard_tag("vcmumble.mic.off")
-                    except Exception:
-                        pass
-                return True
-            if has_off:
+            # Fail closed: OFF wins even if stale ON is still present.
+            if "vcmumble.mic.off" in tags:
                 return False
+            return "vcmumble.mic.on" in tags
         except Exception:
-            pass
-        return True
+            return False
 
     @staticmethod
     def _bounded_int(

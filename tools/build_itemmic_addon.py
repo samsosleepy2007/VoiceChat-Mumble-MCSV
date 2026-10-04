@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def build():
     source = ROOT / "addon"
     version = ".".join(map(str, json.loads((source / "BP/manifest.json").read_text())["header"]["version"]))
-    output = ROOT / "release-assets" / f"VC_Mumble_ItemMic_v{version}_Money.mcaddon"
+    output = ROOT / "release-assets" / f"VC_Mumble_ItemMic_v{version}_MicFix.mcaddon"
     output.parent.mkdir(exist_ok=True)
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as addon:
         for pack in ("BP", "RP"):
