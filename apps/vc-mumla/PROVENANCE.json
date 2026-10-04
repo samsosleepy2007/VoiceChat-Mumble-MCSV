@@ -1,0 +1,9 @@
+{
+  "source_repository": "https://github.com/samsosleepy2007/VoiceChat-Minecraft-bedrock-Mumble",
+  "source_commit": "8ea9e038e5896eb61cca6cd606b1efbc9868607b",
+  "mumla_commit": "477b337ebcee1655c1357d51db99cf92bbc175a4",
+  "humla_commit": "7966f3828d6ed87ef29c517abfade6ad7998cdc5",
+  "apk_release": "v0.6.0-beta.12",
+  "apk_sha256": "0535451d2fd1c8cc49b06bba788494118238ddd680707d9cd40bed84c8ab2152",
+  "note": "Published APK copied unchanged; source uses upstream pins with original VC patch."
+}

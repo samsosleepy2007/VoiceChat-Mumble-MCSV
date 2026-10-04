@@ -1,0 +1,161 @@
+/*
+ * Copyright (C) 2014 Andrew Comminos
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+buildscript {
+    repositories {
+        mavenCentral()
+        google()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.13.2'
+    }
+}
+apply plugin: 'com.android.application'
+
+repositories {
+    mavenCentral()
+    google()
+}
+
+def signingFile = file 'signing.gradle'
+if (signingFile.exists()) apply from: signingFile
+def signingBetaFile = file 'signing-beta.gradle'
+if (signingBetaFile.exists()) apply from: signingBetaFile
+
+allprojects {
+    tasks.withType(JavaCompile) {
+        // TODO include deprecations at some point, but currently they are *many*
+        options.compilerArgs << "-Xlint:all" << "-Xlint:-deprecation" << "-Xlint:-dep-ann"
+    }
+}
+
+android {
+    namespace = 'se.lublin.mumla'
+    compileSdk = 36
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_21
+        targetCompatibility JavaVersion.VERSION_21
+    }
+
+    base {
+        archivesName = "mumla"
+    }
+
+    // gradle8: Need to enable this when defaultConfig below contains some custom BuildConfig
+    buildFeatures {
+        buildConfig = true
+    }
+
+    def gitDescribe = providers.exec {
+        // Need --always because there are no tags in gitlab ci (right?)
+        commandLine "git", "describe", "--tags", "--match", "[0-9]*.[0-9]*.[0-9]*", "--always"
+    }.standardOutput.asText.get().trim()
+
+    defaultConfig {
+        minSdkVersion 21
+        targetSdk 36
+
+        applicationId "se.lublin.mumla"
+        // Remember: app_news_items_vX_Y_Z in src/main/res/values/strings.xml
+        // and NEWS_ITEMS in src/main/res/java/se/lublin/mumla/app/DialogUtils.java
+        //     code:XYYZZbb (bb for build)
+        versionCode 3070300
+        versionName gitDescribe
+
+        buildConfigField "long", "TIMESTAMP", System.currentTimeMillis() + "L"
+        buildConfigField "String", "VERSIONTAG", "\"" + gitDescribe.split("-")[0] + "\""
+
+        testInstrumentationRunner "android.test.InstrumentationTestRunner"
+    }
+
+    flavorDimensions "release"
+    productFlavors {
+        goog {
+            dimension "release"
+            applicationId "se.lublin.mumla"
+        }
+        foss {
+            dimension "release"
+            applicationId "se.lublin.mumla"
+        }
+        donation {
+            dimension "release"
+            applicationId "se.lublin.mumla.donation"
+        }
+        beta {
+            dimension "release"
+            applicationId "se.lublin.mumla.beta"
+        }
+    }
+
+    buildTypes {
+        // signingConfig beta will override
+        release {
+            if (android.hasProperty("signingConfigs")) {
+                if (signingConfigs.hasProperty("release")) {
+                    signingConfig = signingConfigs.release
+                }
+                if (signingConfigs.hasProperty("beta")) {
+                    signingConfig = signingConfigs.beta
+                }
+            }
+        }
+        debug {
+            versionNameSuffix "-debug"
+            if (android.hasProperty("signingConfigs")) {
+                if (signingConfigs.hasProperty("beta")) {
+                    signingConfig = signingConfigs.beta
+                }
+            }
+        }
+    }
+    lint {
+        abortOnError = true
+        // InvalidPackage is spongycastle-related
+        disable 'InvalidPackage', 'MissingTranslation'
+        explainIssues = true
+        ignoreWarnings = false
+        quiet = false
+    }
+    // betas may be released every minute
+    // TODO? dynamic stuff, have to rebuild a lot
+    applicationVariants.all { variant ->
+        if (variant.flavorName == "beta") {
+            variant.outputs.each { output ->
+                output.versionCodeOverride = System.currentTimeSeconds() / 60
+            }
+        }
+    }
+
+}
+
+dependencies {
+    implementation project(":libraries:humla")
+    implementation 'androidx.appcompat:appcompat:1.7.1'
+    implementation 'androidx.cardview:cardview:1.0.0'
+    implementation 'androidx.documentfile:documentfile:1.1.0'
+    implementation 'androidx.fragment:fragment:1.8.9'
+    implementation 'androidx.recyclerview:recyclerview:1.4.0'
+    implementation 'androidx.exifinterface:exifinterface:1.4.2'
+    implementation 'com.google.android.material:material:1.13.0'
+    implementation 'androidx.preference:preference:1.2.1'
+    implementation 'org.jsoup:jsoup:1.13.1'
+    implementation 'info.guardianproject.netcipher:netcipher:2.1.0'
+
+    googImplementation 'com.android.billingclient:billing:7.1.1'
+}

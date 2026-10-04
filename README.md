@@ -110,3 +110,7 @@ default_attenuation_level = 3
 
 Money items use format 1.26.0 with armor/enchantable/durability/repairable removed.
 Mic flag reassertion checks getItem before accessing a container slot and handles unloaded slots.
+
+## VC Mumla player app
+
+Source code and published Android APK: [apps/vc-mumla](apps/vc-mumla/README.md).
