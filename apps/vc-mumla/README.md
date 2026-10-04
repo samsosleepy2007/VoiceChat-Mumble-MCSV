@@ -17,7 +17,7 @@ Use Java 21, Android SDK 36 and NDK 25.1.8937393.
 cd apps/vc-mumla/source/libraries/humla/libs/humla-spongycastle
 chmod +x ../../gradlew
 ../../gradlew jar --no-daemon
-cd ../../../../..
+cd ../../../..
 chmod +x gradlew
 ./gradlew :app:assembleBetaDebug --stacktrace --no-daemon
 ~~~
