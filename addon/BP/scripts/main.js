@@ -2,7 +2,6 @@ import {
   world,
   system,
   ItemStack,
-  MolangVariableMap,
   ItemLockMode,
   EntityComponentTypes,
   EquipmentSlot,
@@ -2406,19 +2405,37 @@ function applyMicModeFromUi(
   });
 }
 
-function showVoiceRangePreview(player, rawRadius) {
-  const radius = Math.max(1, Math.min(150, Math.floor(Number(rawRadius) || 1)));
+const activeRangePreviews = new Map();
+function voiceRangePreviewParticleId(radius) {
+  return VOICE_RANGE_PREVIEW_PREFIX + String(radius).padStart(3, "0");
+}
+function renderVoiceRangePreview(player, radius) {
   try {
+    if (player.isValid === false) return false;
     const center = player.location;
-    const variables = new MolangVariableMap();
-    variables.setFloat("variable.range_radius", radius);
-    player.spawnParticle("vcmumble:private_voice_range_ring", {
-      x: center.x, y: center.y + 1.0, z: center.z,
-    }, variables);
+    player.spawnParticle(voiceRangePreviewParticleId(radius), {
+      x: center.x, y: center.y + 0.9, z: center.z,
+    });
+    return true;
   } catch (error) {
-    console.warn(`[SleepyMic] range preview failed: ${error}`);
+    console.warn(`[SleepyMic] PARTICLE_SPAWN_FAIL player=${player.name} radius=${radius}: ${error}`);
+    return false;
   }
 }
+function showVoiceRangePreview(player, rawRadius) {
+  const radius = Math.max(1, Math.min(150, Math.floor(Number(rawRadius) || 1)));
+  if (!renderVoiceRangePreview(player, radius)) return;
+  activeRangePreviews.set(player.id, { player, radius, expiresAt: system.currentTick + 200, nextAt: system.currentTick + 20 });
+  console.warn(`[SleepyMic] RANGE_PREVIEW player=${player.name} radius=${radius} ttl=10s particle=${voiceRangePreviewParticleId(radius)}`);
+}
+system.runInterval(() => {
+  for (const [id, preview] of activeRangePreviews) {
+    if (system.currentTick >= preview.expiresAt || preview.player.isValid === false) { activeRangePreviews.delete(id); continue; }
+    if (system.currentTick < preview.nextAt) continue;
+    preview.nextAt = system.currentTick + 20;
+    if (!renderVoiceRangePreview(preview.player, preview.radius)) activeRangePreviews.delete(id);
+  }
+}, 20);
 
 const openSettingsPlayers = new Set();
 const openSettingsForms = new Map();
@@ -2897,5 +2914,5 @@ system.runInterval(() => {
 }, 100);
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.15.17 — private waist-height mic range ring"
+  "[VCMumbleItem/BP] Loaded v2.15.18 — restored static private range preview"
 );
