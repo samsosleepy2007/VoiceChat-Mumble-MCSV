@@ -1,4 +1,4 @@
-name: Release SleepyPhone v0.5.5
+name: Release SleepyPhone v0.5.6
 on:
   push:
     branches: [main]
@@ -7,7 +7,7 @@ permissions:
   contents: write
 jobs:
   release:
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release-v0.5.5]'))
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release-v0.5.6]'))
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -17,6 +17,7 @@ jobs:
           node --check addon/BP/scripts/main.js
           node tests/test_phone_calls.mjs
           node tests/test_contacts_ui.mjs
+          node tests/test_phone_history.mjs
           python3 tests/test_phone_voice.py
           python3 tests/test_unified_contract.py
           g++ -std=c++17 -fPIC tests/test_call_routing.cpp mumble-patch/VCProximity.cpp -I mumble-patch $(pkg-config --cflags --libs Qt6Core) -o /tmp/test-call-routing
@@ -27,7 +28,7 @@ jobs:
           python3 -m build --wheel
           python3 tools/build_itemmic_addon.py
           mkdir out
-          cp dist/*.whl release-assets/VC_Mumble_ItemMic_v2.15.10_MicFix.mcaddon out/
+          cp dist/*.whl release-assets/VC_Mumble_ItemMic_v2.15.16_MicFix.mcaddon out/
       - name: Include existing VC Mumla client
         env:
           GH_TOKEN: ${{ github.token }}
@@ -37,4 +38,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           (cd out && sha256sum *.whl *.mcaddon *.apk > SHA256SUMS.txt)
-          gh release create v0.5.5 out/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title 'v0.5.5 — SleepyPhone Calls & Contacts' --notes-file release-notes/v0.5.5.md --latest
+          gh release create v0.5.6 out/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title 'v0.5.6 — SleepyPhone Chat & Faster DDUI' --notes-file release-notes/v0.5.6.md --latest
