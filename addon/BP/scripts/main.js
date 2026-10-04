@@ -770,11 +770,32 @@ function readPhoneDeleted(phoneId) {
   try { const ids = JSON.parse(world.getDynamicProperty("vcmphone:deleted:" + phoneId) || "[]"); return Array.isArray(ids) ? ids : []; }
   catch { return []; }
 }
+function phoneChatClearState(phoneId) {
+  try { return JSON.parse(world.getDynamicProperty("vcmphone:chat_cleared:" + phoneId) || "{}"); }
+  catch { return {}; }
+}
+function phoneMessageWasCleared(phoneId, message, peerId = "") {
+  const peer = message.outgoing ? message.peerPhoneId || peerId : message.senderPhoneId;
+  const key = `${message.outgoing || !message.anonymous ? "normal:" : "anonymous:"}${peer}`;
+  const cleared = phoneChatClearState(phoneId)[key];
+  return !!cleared && (message.timestamp < cleared.before || cleared.ids.includes(message.id));
+}
+function deletePhoneConversation(ownId, peerId, anonymous = false) {
+  const messages = phoneConversationMessages(ownId, peerId, anonymous);
+  const clears = phoneChatClearState(ownId);
+  clears[`${anonymous ? "anonymous:" : "normal:"}${peerId}`] = {
+    before: Date.now(), ids: messages.map(m => m.id),
+  };
+  world.setDynamicProperty("vcmphone:chat_cleared:" + ownId, JSON.stringify(clears));
+  writePhoneInbox(ownId, readPhoneInbox(ownId).filter(m => m.senderPhoneId !== peerId || m.anonymous !== anonymous));
+  if (!anonymous) writePhoneOutgoing(ownId, readPhoneOutgoing(ownId).filter(m => m.peerPhoneId !== peerId));
+}
+
 function phoneInboxThreads(phoneId) {
   const deleted = new Set(readPhoneDeleted(phoneId));
   const all = readPhoneInbox(phoneId).concat(readPhoneOutgoing(phoneId).map(m => ({
     ...m, senderPhoneId: m.peerPhoneId, senderNumber: m.peerNumber, senderName: "", anonymous: false, outgoing: true, read: true,
-  }))).filter(m => !deleted.has(m.id)).sort((a,b) => b.timestamp - a.timestamp);
+  }))).filter(m => !deleted.has(m.id) && !phoneMessageWasCleared(phoneId, m)).sort((a,b) => b.timestamp - a.timestamp);
   const threads = new Map();
   for (const message of all) {
     const key = `${message.anonymous ? "anonymous:" : "normal:"}${message.senderPhoneId || message.senderNumber}`;
@@ -795,7 +816,7 @@ function phoneConversationMessages(ownId, peerId, anonymous = false) {
     for (const m of [...readPhoneOutgoing(ownId)].reverse()) if (m.peerPhoneId === peerId) messages.set(m.id, { ...m, read: m.read === true || messages.get(m.id)?.read === true, outgoing: true });
   }
   const deleted = new Set(readPhoneDeleted(ownId));
-  return [...messages.values()].filter(m => !deleted.has(m.id)).sort((a,b) => a.timestamp - b.timestamp);
+  return [...messages.values()].filter(m => !deleted.has(m.id) && !phoneMessageWasCleared(ownId, m, peerId)).sort((a,b) => a.timestamp - b.timestamp);
 }
 function markPhoneConversationRead(ownId, peerId, anonymous = false) {
   const inbox = readPhoneInbox(ownId);
@@ -1057,7 +1078,7 @@ async function showPhone(player, requestedAt = Date.now()) {
     const pageNames = [
       "setupName", "setupNumber", "home", "bank", "sendMethod", "sendNumber", "contacts",
       "addContact", "contactDetail", "deleteContact", "compose", "inbox", "messageDetail",
-      "callMethod", "callNumber", "callContacts", "callStatus", "contactsApp", "editContact", "callConfirm",
+      "callMethod", "callNumber", "callContacts", "callStatus", "contactsApp", "editContact", "callConfirm", "deleteChat",
     ];
     const pages = Object.fromEntries(
       pageNames.map((name) => [name, new ObservableBoolean(false)])
@@ -1122,6 +1143,7 @@ async function showPhone(player, requestedAt = Date.now()) {
     const inboxEmptyText = new ObservableString("");
     const messageDetailText = new ObservableString("");
     const messageDetailStatus = new ObservableString("");
+    const deleteChatText = new ObservableString("");
 
     const contactButtonLabels = [];
     const contactButtonVisible = [];
@@ -1758,19 +1780,24 @@ async function showPhone(player, requestedAt = Date.now()) {
       beginCompose(target, displayName);
     };
 
-    const deleteSelectedMessage = () => {
+    const beginDeleteChat = () => {
+      if (!selectedMessage || !activeProfile) return;
+      const name = resolveIncomingMessageName(activeProfile.id, selectedMessage);
+      const number = selectedMessage.anonymous ? ANONYMOUS_NUMBER : selectedMessage.senderNumber;
+      deleteChatText.setData(`\nต้องการลบแชทกับ ${name && !selectedMessage.anonymous ? name + " (" + number + ")" : number} หรือไม่?\n\nประวัติการคุยทั้งหมดในแชทนี้จะถูกลบจากโทรศัพท์ของคุณ และไม่สามารถย้อนกลับได้\n`);
+      showPage("deleteChat");
+    };
+    const confirmDeleteChat = () => {
       if (!activeProfile || !selectedMessage) return;
       try {
-        const inbox = readPhoneInbox(activeProfile.id).filter((entry) => entry.id !== selectedMessage.id);
-        writePhoneInbox(activeProfile.id, inbox);
-        world.setDynamicProperty("vcmphone:deleted:" + activeProfile.id, JSON.stringify([selectedMessage.id, ...readPhoneDeleted(activeProfile.id)].slice(0, 200)));
-        if (selectedMessage.outgoing) writePhoneOutgoing(activeProfile.id, readPhoneOutgoing(activeProfile.id).filter(m => m.id !== selectedMessage.id));
+        deletePhoneConversation(activeProfile.id, selectedMessage.senderPhoneId, selectedMessage.anonymous);
         selectedMessage = undefined;
         refreshInbox();
         showPage("inbox");
       } catch (e) {
-        console.warn(`[VCMumbleItem/BP] delete message failed player=${player.name}: ${e}`);
-        messageDetailStatus.setData("\n§cลบข้อความไม่สำเร็จ กรุณาลองใหม่§r\n");
+        console.warn(`[VCMumbleItem/BP] delete chat failed player=${player.name}: ${e}`);
+        messageDetailStatus.setData("\nลบแชทไม่สำเร็จ กรุณาลองใหม่\n");
+        showPage("messageDetail");
       }
     };
 
@@ -1976,9 +2003,13 @@ async function showPhone(player, requestedAt = Date.now()) {
       .button("เก่ากว่า", () => { detailHistoryPage++; refreshDetailHistory(); showPage("messageDetail"); }, { visible: detailOlderVisible })
       .button("ใหม่กว่า", () => { detailHistoryPage--; refreshDetailHistory(); showPage("messageDetail"); }, { visible: detailNewerVisible })
       .button("ตอบกลับ", replySelectedMessage, { visible: pages.messageDetail })
-      .button("ลบข้อความ", deleteSelectedMessage, { visible: pages.messageDetail })
+      .button("ลบแชท", beginDeleteChat, { visible: pages.messageDetail })
       .button("ย้อนกลับ", openInbox, { visible: pages.messageDetail })
-      .label(messageDetailStatus, { visible: pages.messageDetail });
+      .label(messageDetailStatus, { visible: pages.messageDetail })
+      .header("ยืนยันลบแชท", { visible: pages.deleteChat })
+      .label(deleteChatText, { visible: pages.deleteChat })
+      .button("ยืนยันลบแชท", confirmDeleteChat, { visible: pages.deleteChat })
+      .button("ยกเลิก", () => showPage("messageDetail"), { visible: pages.deleteChat });
 
     return form;
     };
@@ -2834,5 +2865,5 @@ system.runInterval(() => {
 }, 100);
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.15.13 — history colors + read receipts"
+  "[VCMumbleItem/BP] Loaded v2.15.14 — confirmed whole-chat deletion"
 );
