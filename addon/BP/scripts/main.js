@@ -849,6 +849,20 @@ function acceptPhoneCall(player) {
     b.sendMessage("[ SleepyPhone ] รับสายแล้ว คุยกันได้โดยไม่จำกัดระยะ");
   } catch { endPhoneCall(call, "เชื่อมต่อสายไม่สำเร็จ"); }
 }
+function togglePhoneSpeaker(player) {
+  const call = phoneCallFor(player);
+  if (!call || call.state !== "active") return false;
+  const role = call.a === player.id ? "a" : "b";
+  const field = role === "a" ? "speakerA" : "speakerB";
+  const enabled = !call[field];
+  // Publish the new flag before removing the old one, so the bridge always
+  // sees a complete two-party call rather than a transient call_end.
+  player.addTag(`${PHONE_CALL_TAG}${call.id}.${role}.${enabled ? 1 : 0}`);
+  player.removeTag(`${PHONE_CALL_TAG}${call.id}.${role}.${enabled ? 0 : 1}`);
+  call[field] = enabled;
+  player.sendMessage(`[ SleepyPhone ] ลำโพง: ${enabled ? "เปิด" : "ปิด"}`);
+  return enabled;
+}
 system.runInterval(() => {
   for (const call of phoneCalls.values()) {
     const a = callPlayer(call.a), b = callPlayer(call.b);
@@ -956,6 +970,8 @@ async function showPhone(player) {
     const callStatusText = new ObservableString("");
     const callAnonymousLabel = new ObservableString("ไม่ระบุตัวตน: ปิด");
     const callAcceptVisible = new ObservableBoolean(false);
+    const callSpeakerVisible = new ObservableBoolean(false);
+    const callSpeakerLabel = new ObservableString("ลำโพง: ปิด");
     const callContactVisible = Array.from({length: PHONE_CONTACT_LIMIT}, () => new ObservableBoolean(false));
     let callAnonymous = false;
     const toggleCallAnonymous = () => {
@@ -969,6 +985,7 @@ async function showPhone(player) {
       const identity = incoming ? (call.anonymous ? "ไม่ระบุตัวตน" : `${call.callerName} (${call.callerNumber})`) : `${call.targetName} (${call.targetNumber})`;
       callStatusText.setData(`\n${call.state === "active" ? "กำลังคุยสาย" : incoming ? "มีสายเข้า" : "กำลังรอรับสาย"}\n\n${identity}\n`);
       callAcceptVisible.setData(incoming && call.state === "ringing");
+      callSpeakerLabel.setData(`ลำโพง: ${(incoming ? call.speakerB : call.speakerA) ? "เปิด" : "ปิด"}`);
       showPage("callStatus");
     };
     const openCallMethod = () => {
@@ -1005,6 +1022,7 @@ async function showPhone(player) {
     // can leak into Home, Send by Number, Inbox, or appear under Favorites.
     syncDynamicButtonVisibility = () => {
       const currentCall = phoneCallFor(player);
+      callSpeakerVisible.setData(currentPhonePage === "callStatus" && currentCall?.state === "active");
       callAcceptVisible.setData(currentPhonePage === "callStatus" && currentCall?.b === player.id && currentCall?.state === "ringing");
       for (let i = 0; i < PHONE_CONTACT_LIMIT; i++) {
         callContactVisible[i].setData(currentPhonePage === "callContacts" && contactButtonHasData[i] === true);
@@ -1602,6 +1620,10 @@ async function showPhone(player) {
       .header("สถานะการโทร", { visible: pages.callStatus })
       .label(callStatusText, { visible: pages.callStatus })
       .button("รับสาย", () => { acceptPhoneCall(player); form.close(); }, { visible: callAcceptVisible })
+      .button(callSpeakerLabel, () => {
+        const enabled = togglePhoneSpeaker(player);
+        callSpeakerLabel.setData(`ลำโพง: ${enabled ? "เปิด" : "ปิด"}`);
+      }, { visible: callSpeakerVisible })
       .button("ตัดสาย", () => { endPhoneCall(phoneCallFor(player)); form.close(); }, { visible: pages.callStatus })
       .button("ย้อนกลับ", openHome, { visible: pages.callStatus });
 
@@ -2528,5 +2550,5 @@ system.runInterval(() => {
 }, 100);
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.15.8 — Mic DDUI open guard + slider confirmation"
+  "[VCMumbleItem/BP] Loaded v2.15.9 — Mic DDUI open guard + slider confirmation"
 );
