@@ -25,7 +25,7 @@ assert.equal(ctx.phoneConversationText(history,2).newer,true);
 ctx.writePhoneOutgoing('a',Array.from({length:100},(_,i)=>({...msg('large'+i,'a','ก'.repeat(500),1),peerPhoneId:'b',peerNumber:'0002'})));
 assert.equal(ctx.readPhoneOutgoing('a').length,100);
 for (const [key,value] of properties) if(key.startsWith('vcmphone:outgoing:a:chunk:')) assert.ok(Buffer.byteLength(value,'utf8')<=28000);
-assert.equal(latest.text.split(/body\d+/).length-1,10);
+assert.equal(latest.text.split(/body\d+/).length-1,5);
 assert.match(ctx.phoneConversationText(history,0,true).text,/body0/);
 assert.ok(!source.includes('phoneChat(player, `เตรียมและส่งคำขอเปิด DDUI:'));
 console.log('PASS: legacy incoming/outgoing recovery, persistence, one thread per pair, anonymous isolation, paging and notification privacy.');

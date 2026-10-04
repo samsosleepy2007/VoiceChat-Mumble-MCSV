@@ -855,7 +855,7 @@ function markPhoneConversationRead(ownId, peerId, anonymous = false) {
   for (const [senderId, outgoing] of changedSenders) writePhoneOutgoing(senderId, outgoing);
 }
 function phoneConversationText(messages, page = 0, all = false) {
-  const pageSize = 10;
+  const pageSize = 5;
   const totalPages = Math.max(1, Math.ceil(messages.length / pageSize));
   page = Math.max(0, Math.min(page, totalPages - 1));
   const end = Math.max(0, messages.length - page * pageSize);
@@ -2013,7 +2013,7 @@ async function showPhone(player, requestedAt = Date.now()) {
 
       .header("เขียนข้อความ", { visible: pages.compose })
       .label(composeRecipientText, { visible: pages.compose })
-      .button("ดูประวัติแชททั้งหมด", openFullHistory, { visible: pages.compose })
+      .button("ดูประวัติแชททั้งหมด", openFullHistory, { visible: composeOlderVisible })
       .label(composeHistoryText, { visible: pages.compose })
       .textField("ข้อความ", composeInput, {
         visible: pages.compose,
@@ -2040,7 +2040,7 @@ async function showPhone(player, requestedAt = Date.now()) {
 
       .header("ข้อความ", { visible: pages.messageDetail })
       .label(messagePeerText, { visible: pages.messageDetail })
-      .button("ดูประวัติแชททั้งหมด", openFullHistory, { visible: pages.messageDetail })
+      .button("ดูประวัติแชททั้งหมด", openFullHistory, { visible: detailOlderVisible })
       .label(messageDetailText, { visible: pages.messageDetail })
       .button("ตอบกลับ", replySelectedMessage, { visible: pages.messageDetail })
       .button("ลบแชท", beginDeleteChat, { visible: pages.messageDetail })
@@ -2911,5 +2911,5 @@ system.runInterval(() => {
 }, 100);
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.15.15 — confirmed whole-chat deletion"
+  "[VCMumbleItem/BP] Loaded v2.15.16 — five-message chat and full history"
 );
