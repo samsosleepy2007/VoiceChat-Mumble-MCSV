@@ -1,7 +1,7 @@
 name: Test SleepyPhone 4-block Mic
 on:
   push:
-    branches: [feature/phone-mic-4-block-test]
+    branches: [feature/phone-mic-4-block-test, investigate/sleepyphone-open-lag]
   workflow_dispatch:
 permissions:
   contents: read
@@ -28,4 +28,4 @@ jobs:
           name: sleepyphone-4-block-test
           path: |
             dist/*.whl
-            release-assets/VC_Mumble_ItemMic_v2.15.10_MicFix.mcaddon
+            release-assets/VC_Mumble_ItemMic_v2.15.11_MicFix.mcaddon

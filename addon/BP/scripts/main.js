@@ -942,7 +942,31 @@ system.runInterval(() => {
 
 const openPhonePlayers = new Set();
 
-async function showPhone(player) {
+// Only register controls visible on this page with the native DDUI form.
+// Shared observables preserve input while each navigation creates a new form.
+function phonePageForm(player, title) {
+  const native = new CustomForm(player, title);
+  let controls = 0;
+  let proxy;
+  proxy = new Proxy(native, {
+    get(target, key) {
+      if (key === "controlCount") return controls;
+      const method = target[key];
+      if (typeof method !== "function") return method;
+      if (["show", "close"].includes(key)) return method.bind(target);
+      return (...args) => {
+        const options = args[args.length - 1];
+        if (options?.visible && !options.visible.getData()) return proxy;
+        method.apply(target, args);
+        controls++;
+        return proxy;
+      };
+    },
+  });
+  return proxy;
+}
+
+async function showPhone(player, requestedAt = Date.now()) {
   if (!player) return;
   if (openPhonePlayers.has(player.id)) return;
   if (openSettingsPlayers.has(player.id)) {
@@ -967,12 +991,15 @@ async function showPhone(player) {
       pageNames.map((name) => [name, new ObservableBoolean(false)])
     );
 
+    let form;
+    let requestedPage = false;
     let currentPhonePage = "";
     let syncDynamicButtonVisibility = () => {};
     const showPage = (name) => {
       currentPhonePage = name;
       for (const pageName of pageNames) pages[pageName].setData(pageName === name);
       syncDynamicButtonVisibility();
+      if (form) { requestedPage = true; form.close(); }
     };
 
     if (initial.profile) showPage("home");
@@ -1653,7 +1680,8 @@ async function showPhone(player) {
       refreshInbox();
     }
 
-    const form = new CustomForm(player, "SleepyPhone")
+    const buildPageForm = () => {
+    const form = phonePageForm(player, "SleepyPhone")
       .header("ตั้งค่าโทรศัพท์ครั้งแรก", { visible: pages.setupName })
       .label("\nกรอกชื่อ IC ที่ต้องการบันทึกไว้กับโทรศัพท์เครื่องนี้\n", { visible: pages.setupName })
       .textField("ชื่อ IC", icNameInput, {
@@ -1847,8 +1875,25 @@ async function showPhone(player) {
       .button("ย้อนกลับ", openInbox, { visible: pages.messageDetail })
       .label(messageDetailStatus, { visible: pages.messageDetail });
 
+    return form;
+    };
+
     if (phoneCallFor(player)) openCallStatus();
-    await form.show();
+    do {
+      requestedPage = false;
+      const buildStarted = Date.now();
+      form = buildPageForm();
+      const readyAt = Date.now();
+      const seconds = ((readyAt - requestedAt) / 1000).toFixed(3);
+      console.warn(`[SleepyPhone/DDUI] page=${currentPhonePage} controls=${form.controlCount} build_ms=${readyAt - buildStarted} prepare_ms=${readyAt - requestedAt}`);
+      phoneChat(player, `เตรียมและส่งคำขอเปิด DDUI: ${seconds} วิ`);
+      await form.show();
+      form = undefined;
+      if (requestedPage) {
+        requestedAt = Date.now();
+        await new Promise(resolve => system.run(resolve));
+      }
+    } while (requestedPage && player.isValid !== false);
   } catch (e) {
     console.warn(`[VCMumbleItem/BP] phone DDUI failed player=${player.name}: ${e}`);
   } finally {
@@ -1856,9 +1901,15 @@ async function showPhone(player) {
   }
 }
 
+const pendingPhoneUiOpens = new Set();
 function handlePhoneUse(player) {
-  if (!player) return;
-  system.run(() => showPhone(player));
+  if (!player || pendingPhoneUiOpens.has(player.id) || openPhonePlayers.has(player.id)) return;
+  const requestedAt = Date.now();
+  pendingPhoneUiOpens.add(player.id);
+  system.run(async () => {
+    try { if (player.isValid !== false) await showPhone(player, requestedAt); }
+    finally { pendingPhoneUiOpens.delete(player.id); }
+  });
 }
 
 function isOperator(player) {
@@ -2679,5 +2730,5 @@ system.runInterval(() => {
 }, 100);
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.15.10 — SleepyPhone Contacts application"
+  "[VCMumbleItem/BP] Loaded v2.15.11 — separate SleepyPhone DDUI pages + preparation timing"
 );
