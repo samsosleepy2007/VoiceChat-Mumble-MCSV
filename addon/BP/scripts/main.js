@@ -2,6 +2,7 @@ import {
   world,
   system,
   ItemStack,
+  MolangVariableMap,
   ItemLockMode,
   EntityComponentTypes,
   EquipmentSlot,
@@ -2405,33 +2406,17 @@ function applyMicModeFromUi(
   });
 }
 
-function voiceRangePreviewParticleId(radius) {
-  return VOICE_RANGE_PREVIEW_PREFIX + String(radius).padStart(3, "0");
-}
-
 function showVoiceRangePreview(player, rawRadius) {
   const radius = Math.max(1, Math.min(150, Math.floor(Number(rawRadius) || 1)));
-  const particleId = voiceRangePreviewParticleId(radius);
-
-  let center;
   try {
-    center = player.location;
-  } catch {
-    return;
-  }
-
-  try {
-    // Static RP definitions avoid MolangVariableMap/runtime scaling entirely.
-    player.spawnParticle(
-      particleId,
-      { x: center.x, y: center.y + 0.04, z: center.z }
-    );
-    player.spawnParticle(
-      particleId,
-      { x: center.x, y: center.y + radius, z: center.z }
-    );
-  } catch {
-    // Preview failure must never block range updates or DDUI.
+    const center = player.location;
+    const variables = new MolangVariableMap();
+    variables.setFloat("variable.range_radius", radius);
+    player.spawnParticle("vcmumble:private_voice_range_ring", {
+      x: center.x, y: center.y + 1.0, z: center.z,
+    }, variables);
+  } catch (error) {
+    console.warn(`[SleepyMic] range preview failed: ${error}`);
   }
 }
 
@@ -2751,6 +2736,7 @@ async function showSettings(player) {
             pendingRequestId = "";
             pendingRange = null;
             player.setDynamicProperty(PROP_VOICE_RANGE, value);
+            showVoiceRangePreview(player, value);
             startVoiceRangeCooldown(player);
             player.sendMessage(`[ SleepyMic ] เปลี่ยนระยะเป็น ${value} บล็อกแล้ว`);
             system.clearRun(refreshId);
@@ -2911,5 +2897,5 @@ system.runInterval(() => {
 }, 100);
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.15.16 — five-message chat and full history"
+  "[VCMumbleItem/BP] Loaded v2.15.17 — private waist-height mic range ring"
 );
