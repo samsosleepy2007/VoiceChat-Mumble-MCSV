@@ -10,7 +10,7 @@ assert.equal(effects[0][1].y,65);assert.equal(effects[0][2]['variable.range_radi
 ctx.showVoiceRangePreview(player,999);assert.equal(effects[1][2]['variable.range_radius'],150);
 const effect=JSON.parse(fs.readFileSync(new URL('../addon/RP/particles/private_voice_range_ring.json',import.meta.url),'utf8')).particle_effect.components;
 assert.equal(effect['minecraft:emitter_rate_instant'].num_particles,1);
-assert.equal(effect['minecraft:particle_appearance_billboard'].facing_camera_mode,'direction_y');
+assert.equal(effect['minecraft:particle_appearance_billboard'].facing_camera_mode,'emitter_transform_xz');
 assert.ok(effect['minecraft:particle_appearance_billboard'].size[0].includes('/ 0.6'));
 assert.ok(source.includes('showVoiceRangePreview(player, value);'));
 console.log('PASS: one player-only emitter at waist height, bounded range and client-side expansion.');
