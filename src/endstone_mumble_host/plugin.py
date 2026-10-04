@@ -30,7 +30,7 @@ ATTENUATION_LEVELS: dict[int, str] = {
 
 class MumbleHost(Plugin):
     prefix = "MumbleHost"
-    version = "0.5.4"
+    version = "0.5.5"
     api_version = "0.11"
     description = "Unified MCSV Mumble server + Item Mic proximity + SleepyPhone call routing"
     authors = ["SamSoSleepy"]
@@ -601,7 +601,7 @@ class MumbleHost(Plugin):
             "z": state.z,
             "yaw": state.yaw,
             "pitch": state.pitch,
-            "voiceRange": int(binding.get("range") or self._default_range),
+            "voiceRange": 4 if state.phone_voice_enabled else int(binding.get("range") or self._default_range),
             "voiceEnabled": bool(state.voice_enabled),
             "attenuationLevel": self._default_attenuation_level,
         }
@@ -628,6 +628,7 @@ class MumbleHost(Plugin):
                 yaw=float(loc.yaw),
                 pitch=float(loc.pitch),
                 voice_enabled=self._voice_enabled_for(player),
+                phone_voice_enabled="vcmumble.call.mic" in player.scoreboard_tags,
             )
             values = (state.x, state.y, state.z, state.yaw, state.pitch)
             if not all(math.isfinite(v) for v in values):
@@ -807,6 +808,8 @@ class MumbleHost(Plugin):
     def _voice_enabled_for(player: Player) -> bool:
         try:
             tags = set(player.scoreboard_tags)
+            if "vcmumble.call.mic" in tags:
+                return True
             # Fail closed: OFF wins even if stale ON is still present.
             if "vcmumble.mic.off" in tags:
                 return False

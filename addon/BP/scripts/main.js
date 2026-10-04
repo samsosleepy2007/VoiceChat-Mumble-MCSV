@@ -429,6 +429,18 @@ function evaluate(player) {
   const offMic = isMicId(getOffId(player));
   const hasMic = state.micKnown || mainMic || offMic;
   const mode = getMode(player);
+  if (player.hasTag("vcmumble.call.mic")) {
+    state.effective = true;
+    if (state.appliedEffective !== true) replaceMicStatus(player, true);
+    state.appliedEffective = true;
+    if (state.publishedEffective !== true || system.currentTick - state.lastPublishedTick >= 100) {
+      publishMicState(player, true);
+      state.publishedEffective = true;
+      state.lastPublishedTick = system.currentTick;
+    }
+    state.lastMainMic = mainMic;
+    return;
+  }
 
   if (mode !== state.mode) {
     if (mode === MODE_TOGGLE) {
@@ -796,8 +808,24 @@ let phoneCallSequence = 0;
 const phoneCalls = new Map();
 const playerPhoneCalls = new Map();
 const PHONE_CALL_TAG = "vcmumble.call.active.";
+const PHONE_VOICE_TAG = "vcmumble.call.mic";
+function enterPhoneVoice(player) {
+  // Overlay only: keep the normal mode, latch and range untouched.
+  setLatch(player, stateFor(player).toggleLatched);
+  player.addTag(PHONE_VOICE_TAG);
+  evaluate(player);
+}
+function leavePhoneVoice(player) {
+  if (!player.hasTag(PHONE_VOICE_TAG)) return;
+  player.removeTag(PHONE_VOICE_TAG);
+  evaluate(player);
+}
 function phoneCallFor(player) { return phoneCalls.get(playerPhoneCalls.get(player.id)); }
 function callPlayer(id) { return world.getAllPlayers().find(p => p.id === id); }
+function heldPhoneData(player) {
+  if (getMainId(player) !== PHONE && getOffId(player) !== PHONE) return undefined;
+  return phoneItemData(currentPhoneSlot(player));
+}
 function clearPhoneCallTags(player) {
   if (!player) return;
   for (const tag of player.getTags()) if (tag.startsWith(PHONE_CALL_TAG)) player.removeTag(tag);
@@ -809,13 +837,15 @@ function endPhoneCall(call, reason = "จบการโทรแล้ว") {
     playerPhoneCalls.delete(id);
     const participant = callPlayer(id);
     if (participant) {
-      try { clearPhoneCallTags(participant); participant.sendMessage(`[ SleepyPhone ] ${reason}`); } catch {}
+      try { clearPhoneCallTags(participant); } catch {}
+      try { leavePhoneVoice(participant); } catch {}
+      try { participant.sendMessage(`[ SleepyPhone ] ${reason}`); } catch {}
     }
   }
 }
 function startPhoneCall(player, ownProfile, targetProfile, anonymous) {
   if (phoneCallFor(player)) return "คุณมีสายอยู่แล้ว";
-  if (phoneItemData(currentPhoneSlot(player))?.id !== ownProfile.id) return "กรุณาถือโทรศัพท์เครื่องเดิม";
+  if (heldPhoneData(player)?.id !== ownProfile.id) return "กรุณาถือโทรศัพท์เครื่องเดิม";
   if (!targetProfile || targetProfile.id === ownProfile.id) return "ไม่สามารถโทรหาเบอร์นี้ได้";
   const target = world.getAllPlayers().find(p => p.id !== player.id && playerHasPhoneId(p, targetProfile.id));
   if (!target) return "ปลายสายไม่ออนไลน์หรือไม่มีโทรศัพท์เครื่องนี้";
@@ -826,6 +856,8 @@ function startPhoneCall(player, ownProfile, targetProfile, anonymous) {
     anonymous, state: "ringing", expires: system.currentTick + 1200 };
   phoneCalls.set(call.id, call);
   playerPhoneCalls.set(call.a, call.id); playerPhoneCalls.set(call.b, call.id);
+  try { enterPhoneVoice(player); }
+  catch { endPhoneCall(call, "เปิดไมค์สำหรับการโทรไม่สำเร็จ"); return "เปิดไมค์สำหรับการโทรไม่สำเร็จ"; }
   player.sendMessage(`[ SleepyPhone ] กำลังโทรไปที่เบอร์ ${targetProfile.number} ใช้โทรศัพท์เพื่อดูสถานะ`);
   const contact = readPhoneContacts(targetProfile.id).find(c => c.phoneId === ownProfile.id);
   const identity = anonymous ? "ไม่ระบุตัวตน" : `${contact?.name || ownProfile.icName} (${ownProfile.number})`;
@@ -837,10 +869,11 @@ function acceptPhoneCall(player) {
   if (!call || call.b !== player.id || call.state !== "ringing") return;
   const a = callPlayer(call.a), b = callPlayer(call.b);
   if (!a || !b || system.currentTick >= call.expires) { endPhoneCall(call, "สายหมดเวลาแล้ว"); return; }
-  if (phoneItemData(currentPhoneSlot(a))?.id !== call.phoneA || phoneItemData(currentPhoneSlot(b))?.id !== call.phoneB) {
+  if (heldPhoneData(a)?.id !== call.phoneA || heldPhoneData(b)?.id !== call.phoneB) {
     endPhoneCall(call, "สายหลุด เพราะไม่ได้ถือโทรศัพท์ไว้"); return;
   }
   try {
+    enterPhoneVoice(b);
     clearPhoneCallTags(a); clearPhoneCallTags(b);
     a.addTag(`${PHONE_CALL_TAG}${call.id}.a.0`);
     b.addTag(`${PHONE_CALL_TAG}${call.id}.b.0`);
@@ -868,8 +901,8 @@ system.runInterval(() => {
     const a = callPlayer(call.a), b = callPlayer(call.b);
     if (!a || !b) { endPhoneCall(call, "ปลายสายออกจากเซิร์ฟเวอร์แล้ว"); continue; }
     if (call.state === "ringing" && system.currentTick >= call.expires) { endPhoneCall(call, "ไม่มีผู้รับสาย"); continue; }
-    if (phoneItemData(currentPhoneSlot(a))?.id !== call.phoneA ||
-        (call.state === "active" && phoneItemData(currentPhoneSlot(b))?.id !== call.phoneB)) {
+    if (heldPhoneData(a)?.id !== call.phoneA ||
+        (call.state === "active" && heldPhoneData(b)?.id !== call.phoneB)) {
       endPhoneCall(call, "สายหลุด เพราะไม่ได้ถือโทรศัพท์ไว้");
     }
   }
@@ -1776,6 +1809,7 @@ function serverVoiceRangeSnapshot(player) {
 }
 
 function currentVoiceRange(player) {
+  if (player.hasTag(PHONE_VOICE_TAG)) return 4;
   const serverValue = readTaggedNumber(player, RANGE_VALUE_PREFIX, 0);
   if (serverValue >= 1) {
     player.setDynamicProperty(PROP_VOICE_RANGE, serverValue);
@@ -2095,6 +2129,10 @@ function notifyMicUiCooldown(player) {
 }
 
 async function showSettings(player) {
+  if (player.hasTag(PHONE_VOICE_TAG)) {
+    player.sendMessage("[ SleepyMic ] ระหว่างโทร ไมค์เปิดและใช้ระยะ 4 บล็อก เมื่อจบสายจะกลับไปใช้ค่าเดิม");
+    return;
+  }
   const playerId = player.id;
   if (openSettingsPlayers.has(playerId)) return;
   if (voiceRangeCooldownTicks(player) > 0 || system.currentTick < (settingsReopenAfter.get(playerId) ?? 0)) {
@@ -2489,7 +2527,10 @@ system.beforeEvents.startup.subscribe((ev) => {
 world.afterEvents.playerSpawn.subscribe((ev) => {
   const player = ev.player;
   system.run(() => {
-    if (ev.initialSpawn) clearPhoneCallTags(player);
+    if (ev.initialSpawn) {
+      clearPhoneCallTags(player);
+      player.removeTag(PHONE_VOICE_TAG);
+    }
     if (ev.initialSpawn === true) {
       cleanupLegacyVoiceCraftBridgeTags(player);
       migrateDynamicProperties(player);
