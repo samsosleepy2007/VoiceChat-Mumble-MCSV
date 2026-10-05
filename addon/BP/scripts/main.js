@@ -642,6 +642,7 @@ function randomAvailablePhoneNumber() {
 }
 
 function setPhoneItemIdentity(slot, profile) {
+  slot.nameTag = `โทรศัพท์ของ - ${profile.icName}`;
   slot.setDynamicProperty(PHONE_PROP_ID, profile.id);
   slot.setDynamicProperty(PHONE_PROP_IC_NAME, profile.icName);
   slot.setDynamicProperty(PHONE_PROP_NUMBER, profile.number);
@@ -660,7 +661,7 @@ function resolvePhoneProfile(player) {
 
   const stored = readPhoneProfile(itemData.id);
   if (stored) {
-    if (stored.icName !== itemData.icName || stored.number !== itemData.number) {
+    if (stored.icName !== itemData.icName || stored.number !== itemData.number || slot.nameTag !== `โทรศัพท์ของ - ${stored.icName}`) {
       try { setPhoneItemIdentity(slot, stored); } catch {}
     }
     return { slot, profile: stored };
@@ -670,6 +671,7 @@ function resolvePhoneProfile(player) {
   if (!owner || owner === itemData.id) {
     try {
       writePhoneProfile(itemData);
+      setPhoneItemIdentity(slot, itemData);
       return { slot, profile: itemData };
     } catch {}
   }
@@ -3084,5 +3086,5 @@ system.runInterval(() => {
 }, 100);
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.15.26 — fix disabled phone number text field"
+  "[VCMumbleItem/BP] Loaded v2.15.27 — personalized phone item name"
 );
