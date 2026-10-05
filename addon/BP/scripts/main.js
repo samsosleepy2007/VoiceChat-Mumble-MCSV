@@ -1078,6 +1078,37 @@ function phonePageForm(player, title) {
   return proxy;
 }
 
+function readPhoneLock(phoneId) {
+  const raw = world.getDynamicProperty("vcmphone:lock:" + phoneId);
+  if (!raw) return undefined;
+  const lock = JSON.parse(raw);
+  if (!/^\d{4}$/.test(lock.pin) || !lock.owner) throw new Error("ข้อมูลรหัสโทรศัพท์ไม่ถูกต้อง");
+  return lock;
+}
+function writePhoneLock(phoneId, pin, owner) {
+  world.setDynamicProperty("vcmphone:lock:" + phoneId, pin ? JSON.stringify({ pin, owner }) : undefined);
+}
+async function unlockPhone(player, phoneId) {
+  const lock = readPhoneLock(phoneId);
+  if (!lock || lock.owner.toLowerCase() === player.name.toLowerCase()) return true;
+  const input = new ObservableString("", { clientWritable: true });
+  const status = new ObservableString("");
+  let unlocked = false, failures = 0;
+  const form = new CustomForm(player, "SleepyPhone — ปลดล็อก")
+    .label("โทรศัพท์นี้ตั้งรหัสผ่านไว้\nกรอกรหัสตัวเลข 4 หลัก")
+    .textField("รหัสผ่าน", input)
+    .label(status)
+    .button("ปลดล็อก", () => {
+      const current = readPhoneLock(phoneId);
+      if (!current || input.getData() === current.pin) { unlocked = true; form.close(); return; }
+      input.setData(""); failures++;
+      status.setData("รหัสผ่านไม่ถูกต้อง");
+      if (failures >= 5) { phoneChat(player, "รหัสไม่ถูกต้อง กรุณาลองใหม่ภายหลัง", "error"); form.close(); }
+    }).closeButton();
+  await form.show();
+  return unlocked;
+}
+
 async function showPhone(player, requestedAt = Date.now()) {
   if (!player) return;
   if (openPhonePlayers.has(player.id)) return;
@@ -1094,10 +1125,11 @@ async function showPhone(player, requestedAt = Date.now()) {
 
   openPhonePlayers.add(player.id);
   try {
+    if (initial.profile && !await unlockPhone(player, initial.profile.id)) return;
     const pageNames = [
       "setupName", "setupNumber", "home", "bank", "sendMethod", "sendNumber", "contacts",
       "addContact", "contactDetail", "deleteContact", "compose", "inbox", "messageDetail",
-      "callMethod", "callNumber", "callContacts", "callStatus", "contactsApp", "editContact", "callConfirm", "deleteChat",
+      "callMethod", "callNumber", "callContacts", "callStatus", "contactsApp", "editContact", "callConfirm", "deleteChat", "phoneSettings", "createPin",
     ];
     const pages = Object.fromEntries(
       pageNames.map((name) => [name, new ObservableBoolean(false)])
@@ -1427,6 +1459,52 @@ async function showPhone(player, requestedAt = Date.now()) {
       }
       numberInput.setData(number);
       finishRegistration(number);
+    };
+
+    const settingsName = new ObservableString("", { clientWritable: true });
+    const settingsInfo = new ObservableString("");
+    const settingsStatus = new ObservableString("");
+    const newPin = new ObservableString("", { clientWritable: true });
+    const confirmPin = new ObservableString("", { clientWritable: true });
+    const lockButton = new ObservableString("");
+    const refreshPhoneSettings = () => {
+      settingsName.setData(activeProfile.icName);
+      const lock = readPhoneLock(activeProfile.id);
+      settingsInfo.setData(`เบอร์: ${activeProfile.number} (เปลี่ยนไม่ได้)\nรหัสผ่าน: ${lock ? "เปิด" : "ปิด"}`);
+      lockButton.setData(lock ? "ปิดการใช้รหัสผ่าน" : "เปิดการใช้รหัสผ่าน");
+      showPage("phoneSettings");
+    };
+    const settingsPhoneSlot = () => {
+      const current = resolvePhoneProfile(player);
+      if (!current.slot || current.profile?.id !== activeProfile.id) throw new Error("กรุณาถือโทรศัพท์เครื่องเดิม");
+      return current.slot;
+    };
+    const saveIcName = () => {
+      try {
+        const slot = settingsPhoneSlot();
+        const name = normalizeIcName(settingsName.getData());
+        if (!name) throw new Error("ชื่อ IC ไม่ถูกต้องหรือยาวเกินกำหนด");
+        const profile = { ...activeProfile, icName: name };
+        writePhoneProfile(profile); setPhoneItemIdentity(slot, profile);
+        activeProfile = profile; refreshIdentityText(); settingsStatus.setData("บันทึกชื่อ IC แล้ว");
+      } catch (e) { settingsStatus.setData(String(e.message || e)); }
+    };
+    const togglePhoneLock = () => {
+      try {
+        settingsPhoneSlot(); settingsStatus.setData("");
+        if (readPhoneLock(activeProfile.id)) { writePhoneLock(activeProfile.id); refreshPhoneSettings(); }
+        else { newPin.setData(""); confirmPin.setData(""); showPage("createPin"); }
+      } catch (e) { settingsStatus.setData(String(e.message || e)); }
+    };
+    const savePhonePin = () => {
+      try {
+        const slot = settingsPhoneSlot(), pin = newPin.getData();
+        if (!/^\d{4}$/.test(pin)) throw new Error("รหัสต้องเป็นตัวเลข 4 หลัก");
+        if (pin !== confirmPin.getData()) throw new Error("รหัสยืนยันไม่ตรงกัน");
+        writePhoneLock(activeProfile.id, pin, player.name);
+        slot.setDynamicProperty("vcmphone:pin_owner", player.name);
+        newPin.setData(""); confirmPin.setData(""); refreshPhoneSettings(); settingsStatus.setData("เปิดใช้รหัสผ่านแล้ว");
+      } catch (e) { settingsStatus.setData(String(e.message || e)); }
     };
 
     const openHome = () => {
@@ -1882,7 +1960,7 @@ async function showPhone(player, requestedAt = Date.now()) {
         bankStatus.setData("");
         showPage("bank");
       }, { visible: pages.home })
-      .button("ตั้งค่า", () => homeStatus.setData("\nApplication ตั้งค่าเตรียมไว้สำหรับพัฒนาต่อ\n"), { visible: pages.home })
+      .button("ตั้งค่า", () => { settingsStatus.setData(""); refreshPhoneSettings(); }, { visible: pages.home })
       .spacer({ visible: pages.home })
       .header("Favorites", { visible: pages.home })
       .label(favoritesInfo, { visible: pages.home });
@@ -2010,6 +2088,21 @@ async function showPhone(player, requestedAt = Date.now()) {
       .label(deleteContactText, { visible: pages.deleteContact })
       .button("ยืนยันลบรายชื่อ", confirmDeleteContact, { visible: pages.deleteContact })
       .button("ยกเลิก", () => showPage("contactDetail"), { visible: pages.deleteContact })
+
+      .header("ตั้งค่า SleepyPhone", { visible: pages.phoneSettings })
+      .label(settingsInfo, { visible: pages.phoneSettings })
+      .textField("ชื่อ IC", settingsName, { visible: pages.phoneSettings })
+      .button("บันทึกชื่อ IC", saveIcName, { visible: pages.phoneSettings })
+      .button(lockButton, togglePhoneLock, { visible: pages.phoneSettings })
+      .label(settingsStatus, { visible: pages.phoneSettings })
+      .button("ย้อนกลับ", openHome, { visible: pages.phoneSettings })
+      .header("สร้างรหัสผ่าน", { visible: pages.createPin })
+      .label("รหัสตัวเลข 4 หลัก\nผู้ตั้งรหัสเข้าได้โดยไม่ต้องกรอก คนอื่นต้องกรอกรหัสก่อนใช้", { visible: pages.createPin })
+      .textField("รหัส 4 หลัก", newPin, { visible: pages.createPin })
+      .textField("ยืนยันรหัส", confirmPin, { visible: pages.createPin })
+      .label(settingsStatus, { visible: pages.createPin })
+      .button("บันทึกรหัสผ่าน", savePhonePin, { visible: pages.createPin })
+      .button("ยกเลิก", refreshPhoneSettings, { visible: pages.createPin })
 
       .header("เขียนข้อความ", { visible: pages.compose })
       .label(composeRecipientText, { visible: pages.compose })
@@ -2914,5 +3007,5 @@ system.runInterval(() => {
 }, 100);
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.15.19 — expanding private range preview"
+  "[VCMumbleItem/BP] Loaded v2.15.20 — phone settings and PIN lock"
 );

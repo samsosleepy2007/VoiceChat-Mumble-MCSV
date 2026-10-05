@@ -29,6 +29,7 @@ const ctx=vm.createContext({console,Date,ObservableBoolean:Observable,Observable
 });
 vm.runInContext(source.slice(source.indexOf('function phoneContactDateTime('),source.indexOf('function readPhoneInbox(')),ctx);
 vm.runInContext(source.slice(source.indexOf('function readPhoneOutgoing('),source.indexOf('function createMessageId(')),ctx);
+vm.runInContext(source.slice(source.indexOf('function readPhoneLock('),source.indexOf('async function showPhone(')),ctx);
 vm.runInContext(source.slice(source.indexOf('function phonePageForm('),source.indexOf('function handlePhoneUse(')),ctx);
 const session = ctx.showPhone({id:'a',name:'Alice'});
 const settle = () => new Promise(resolve=>setImmediate(resolve));
@@ -65,6 +66,7 @@ ctx.readPhoneInbox=id=>inboxData.get(id)||[];ctx.writePhoneInbox=(id,m)=>inboxDa
 ctx.normalizeMessage=s=>s.trim();ctx.createMessageId=()=>`sent${++messageSequence}`;ctx.notifyPhoneRecipient=()=>{};
 ctx.resolveIncomingMessageName=(_,m)=>contacts.find(c=>c.phoneId===m.senderPhoneId)?.name||'';
 vm.runInContext(source.slice(source.indexOf('function formatPhoneMessageTime('),source.indexOf('function slotHasPhoneId(')),ctx);
+vm.runInContext(source.slice(source.indexOf('function readPhoneLock('),source.indexOf('async function showPhone(')),ctx);
 const messaging=ctx.showPhone({id:'a',name:'Alice'});await settle();
 await click('ส่งข้อความ');await click('ส่งด้วยรายชื่อ');await click('Saved Carol - 0003');
 field('ข้อความ','first message');await click('ส่งข้อความ');
