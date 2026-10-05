@@ -13,7 +13,7 @@ for (const p of players) {
 }
 let monitor;
 const context = vm.createContext({
-  world: { getAllPlayers: () => players },
+  world: { getAllPlayers: () => players, getDynamicProperty: () => undefined },
   console: { warn() {} },
   ANONYMOUS_NUMBER: '#@+*', PHONE: 'phone', MIC_ON: 'on', MIC_OFF: 'off', MODE_HOLD: 'hold', MODE_TOGGLE: 'toggle',
   stateFor: p => p.state ??= { mode: 'toggle', micKnown: true, toggleLatched: p.normalOn, effective: p.normalOn },
