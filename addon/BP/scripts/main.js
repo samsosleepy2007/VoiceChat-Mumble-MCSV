@@ -1520,7 +1520,7 @@ async function showPhone(player, requestedAt = Date.now()) {
 
     const icEditDisabled = new ObservableBoolean(true);
     const ringtoneLabel = new ObservableString("");
-    const settingsNumber = new ObservableString("");
+    const settingsNumber = new ObservableString("", { clientWritable: true });
     const settingsNumberDisabled = new ObservableBoolean(true);
     const settingsName = new ObservableString("", { clientWritable: true });
     const settingsInfo = new ObservableString("");
@@ -3084,5 +3084,5 @@ system.runInterval(() => {
 }, 100);
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.15.25 — ringtone selection previews"
+  "[VCMumbleItem/BP] Loaded v2.15.26 — fix disabled phone number text field"
 );

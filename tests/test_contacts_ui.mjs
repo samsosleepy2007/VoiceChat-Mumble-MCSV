@@ -2,13 +2,13 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import assert from 'node:assert/strict';
 const source=fs.readFileSync(new URL('../addon/BP/scripts/main.js', import.meta.url),'utf8');
-class Observable { constructor(value){this.value=value;} getData(){return this.value;} setData(value){this.value=value;} }
+class Observable { constructor(value,options={}){this.value=value;this.clientWritable=options.clientWritable===true;} getData(){return this.value;} setData(value){this.value=value;} }
 let form, dial, historyBody;
 class ActionForm { title(){return this;} body(text){historyBody=text;return this;} button(){return this;} show(){return Promise.resolve({selection:0});} }
 class Form {
  constructor(){form=this;this.entries=[];}
  button(label,action,options={}){this.entries.push({type:'button',label,action,...options});return this;}
- textField(label,value,options={}){this.entries.push({type:'field',label,value,...options});return this;}
+ textField(label,value,options={}){assert.equal(value.clientWritable,true,'DDUI text fields require clientWritable: '+label);this.entries.push({type:'field',label,value,...options});return this;}
  label(value,options={}){this.entries.push({type:'label',value,...options});return this;}
  header(){return this;} divider(){return this;} spacer(){return this;} toggle(){return this;}
  closeButton(){return this;} close(){this.resolve?.();} show(){return new Promise(resolve=>{this.resolve=resolve;});}
@@ -39,6 +39,12 @@ const value=v=>v instanceof Observable?v.getData():v;
 const buttons=()=>form.entries.filter(e=>e.type==='button'&&e.visible?.getData());
 const click=async name=>{const b=buttons().find(e=>value(e.label)===name);assert.ok(b,`visible button: ${name}`);b.action();await settle();};
 const field=(label,text)=>{const f=form.entries.find(e=>e.type==='field'&&e.visible?.getData()&&e.label===label);assert.ok(f);f.value.setData(text);};
+ctx.phoneRingtone=()=> 'deltarune';
+await click('ตั้งค่า');
+const numberField=form.entries.find(e=>e.type==='field'&&e.label==='เบอร์โทรศัพท์');
+assert.ok(numberField.disabled.getData());assert.equal(numberField.value.getData(),'0001');
+numberField.value.setData('9999');assert.equal(profiles.pa.number,'0001');
+await click('ย้อนกลับ');
 await click('รายชื่อ');await click('Saved Bob - 0002');
 const details=form.entries.filter(e=>e.type==='label'&&e.visible?.getData()).map(e=>value(e.value)).join('\n');
 assert.match(details,/ชื่อ IC:.*Bob/);assert.match(details,/05\/10\/2026 เวลา 04:00/);
