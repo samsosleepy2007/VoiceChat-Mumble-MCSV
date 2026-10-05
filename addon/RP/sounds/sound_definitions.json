@@ -26,6 +26,15 @@
           "name": "sounds/sleepyphone/notification"
         }
       ]
+    },
+    "sleepyphone.ringtone.your_phone_linging": {
+      "category": "ui",
+      "sounds": [
+        {
+          "name": "sounds/sleepyphone/your_phone_linging",
+          "stream": true
+        }
+      ]
     }
   }
 }

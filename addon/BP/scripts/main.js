@@ -977,16 +977,40 @@ function clearPhoneCallTags(player) {
   for (const tag of player.getTags()) if (tag.startsWith(PHONE_CALL_TAG)) player.removeTag(tag);
 }
 function phoneRingtone(phoneId) {
-  return world.getDynamicProperty("vcmphone:ringtone:" + phoneId) === "undertale" ? "undertale" : "deltarune";
+  const choice = world.getDynamicProperty("vcmphone:ringtone:" + phoneId);
+  return ["undertale", "your_phone_linging"].includes(choice) ? choice : "deltarune";
+}
+const ringtonePreviews = new Map();
+function stopRingtonePreview(player) {
+  const preview = ringtonePreviews.get(player.id);
+  if (!preview) return;
+  system.clearRun(preview.job);
+  try { player.runCommand(`stopsound @s ${preview.sound}`); } catch {}
+  ringtonePreviews.delete(player.id);
+}
+function previewRingtone(player, choice) {
+  stopRingtonePreview(player);
+  if (phoneCallFor(player)?.state === "ringing") return;
+  const sound = "sleepyphone.ringtone." + choice;
+  try { player.playSound(sound, { volume: 1, pitch: 1 }); } catch { return; }
+  const ticks = choice === "deltarune" ? 100 : choice === "undertale" ? 21 : 327;
+  const job = system.runTimeout(() => {
+    const preview = ringtonePreviews.get(player.id);
+    if (preview?.job !== job) return;
+    if (choice === "deltarune") { try { player.runCommand(`stopsound @s ${sound}`); } catch {} }
+    ringtonePreviews.delete(player.id);
+  }, ticks);
+  ringtonePreviews.set(player.id, { sound, job });
 }
 function playPhoneRingtone(call) {
   const receiver = callPlayer(call.b);
   if (!receiver || call.state !== "ringing") return;
+  stopRingtonePreview(receiver);
   const choice = call.ringtoneChoice || phoneRingtone(call.phoneB);
   call.ringtoneChoice = choice;
   call.ringtone = "sleepyphone.ringtone." + choice;
   try { receiver.playSound(call.ringtone, { volume: 1, pitch: 1 }); } catch {}
-  call.nextRingTick = system.currentTick + (choice === "undertale" ? 21 : 502);
+  call.nextRingTick = system.currentTick + (choice === "undertale" ? 21 : choice === "your_phone_linging" ? 327 : 502);
 }
 function stopPhoneRingtone(call) {
   const receiver = callPlayer(call.b);
@@ -1505,7 +1529,7 @@ async function showPhone(player, requestedAt = Date.now()) {
     const confirmPin = new ObservableString("", { clientWritable: true });
     const lockButton = new ObservableString("");
     const refreshPhoneSettings = () => {
-      ringtoneLabel.setData("\nRingtone: " + (phoneRingtone(activeProfile.id) === "undertale" ? "Undertale - Ringtone" : "Deltarune (ค่าเริ่มต้น)") + "\n");
+      ringtoneLabel.setData("\nRingtone: " + (phoneRingtone(activeProfile.id) === "undertale" ? "Undertale - Ringtone" : phoneRingtone(activeProfile.id) === "your_phone_linging" ? "YOUR_PHONE_LINGING" : "Deltarune (ค่าเริ่มต้น)") + "\n");
       settingsName.setData(activeProfile.icName);
       settingsNumber.setData(activeProfile.number);
       icEditDisabled.setData(!canEditPhoneIc(player, activeProfile.id));
@@ -1534,7 +1558,7 @@ async function showPhone(player, requestedAt = Date.now()) {
       try {
         settingsPhoneSlot();
         world.setDynamicProperty("vcmphone:ringtone:" + activeProfile.id, choice);
-        refreshPhoneSettings(); settingsStatus.setData("\nบันทึก Ringtone แล้ว\n");
+        refreshPhoneSettings(); previewRingtone(player, choice); settingsStatus.setData("\nบันทึก Ringtone แล้ว\n");
       } catch (e) { settingsStatus.setData(String(e.message || e)); }
     };
     const togglePhoneLock = () => {
@@ -2142,6 +2166,7 @@ async function showPhone(player, requestedAt = Date.now()) {
       .label(ringtoneLabel, { visible: pages.phoneSettings })
       .button("Deltarune - Ringtone", () => chooseRingtone("deltarune"), { visible: pages.phoneSettings })
       .button("Undertale - Ringtone", () => chooseRingtone("undertale"), { visible: pages.phoneSettings })
+      .button("YOUR_PHONE_LINGING", () => chooseRingtone("your_phone_linging"), { visible: pages.phoneSettings })
       .textField("ชื่อ IC", settingsName, { visible: pages.phoneSettings, disabled: icEditDisabled })
       .textField("เบอร์โทรศัพท์", settingsNumber, { visible: pages.phoneSettings, disabled: settingsNumberDisabled })
       .button("บันทึกชื่อ IC", saveIcName, { visible: pages.phoneSettings, disabled: icEditDisabled })
@@ -3059,5 +3084,5 @@ system.runInterval(() => {
 }, 100);
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.15.24 — selectable ringtones and message notification"
+  "[VCMumbleItem/BP] Loaded v2.15.25 — ringtone selection previews"
 );
