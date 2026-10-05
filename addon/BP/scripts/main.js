@@ -1078,6 +1078,15 @@ function phonePageForm(player, title) {
   return proxy;
 }
 
+function phoneIcOwner(phoneId) {
+  const owner = world.getDynamicProperty("vcmphone:ic_owner:" + phoneId);
+  return typeof owner === "string" ? owner : "";
+}
+function canEditPhoneIc(player, phoneId) {
+  const owner = phoneIcOwner(phoneId);
+  return !!owner && owner.toLowerCase() === player.name.toLowerCase();
+}
+
 function readPhoneLock(phoneId) {
   const raw = world.getDynamicProperty("vcmphone:lock:" + phoneId);
   if (!raw) return undefined;
@@ -1425,6 +1434,8 @@ async function showPhone(player, requestedAt = Date.now()) {
       try {
         setPhoneItemIdentity(slot, profile);
         writePhoneProfile(profile);
+        world.setDynamicProperty("vcmphone:ic_owner:" + profile.id, player.name);
+        slot.setDynamicProperty("vcmphone:ic_owner", player.name);
       } catch (e) {
         console.warn(`[VCMumbleItem/BP] phone registration failed player=${player.name}: ${e}`);
         setupStatus.setData("\n§cลงทะเบียนโทรศัพท์ไม่สำเร็จ กรุณาลองใหม่§r\n");
@@ -1461,6 +1472,7 @@ async function showPhone(player, requestedAt = Date.now()) {
       finishRegistration(number);
     };
 
+    const icEditDisabled = new ObservableBoolean(true);
     const settingsName = new ObservableString("", { clientWritable: true });
     const settingsInfo = new ObservableString("");
     const settingsStatus = new ObservableString("");
@@ -1469,8 +1481,9 @@ async function showPhone(player, requestedAt = Date.now()) {
     const lockButton = new ObservableString("");
     const refreshPhoneSettings = () => {
       settingsName.setData(activeProfile.icName);
+      icEditDisabled.setData(!canEditPhoneIc(player, activeProfile.id));
       const lock = readPhoneLock(activeProfile.id);
-      settingsInfo.setData(`เบอร์: ${activeProfile.number} (เปลี่ยนไม่ได้)\nรหัสผ่าน: ${lock ? "เปิด" : "ปิด"}`);
+      settingsInfo.setData(`${icEditDisabled.getData() ? "ชื่อ IC แก้ได้เฉพาะผู้ลงทะเบียนครั้งแรก\n" : ""}เบอร์: ${activeProfile.number} (เปลี่ยนไม่ได้)\nรหัสผ่าน: ${lock ? "เปิด" : "ปิด"}`);
       lockButton.setData(lock ? "ปิดการใช้รหัสผ่าน" : "เปิดการใช้รหัสผ่าน");
       showPage("phoneSettings");
     };
@@ -1482,6 +1495,7 @@ async function showPhone(player, requestedAt = Date.now()) {
     const saveIcName = () => {
       try {
         const slot = settingsPhoneSlot();
+        if (!canEditPhoneIc(player, activeProfile.id)) throw new Error("เฉพาะผู้ตั้งชื่อ IC ครั้งแรกเท่านั้นที่แก้ไขได้");
         const name = normalizeIcName(settingsName.getData());
         if (!name) throw new Error("ชื่อ IC ไม่ถูกต้องหรือยาวเกินกำหนด");
         const profile = { ...activeProfile, icName: name };
@@ -2091,8 +2105,8 @@ async function showPhone(player, requestedAt = Date.now()) {
 
       .header("ตั้งค่า SleepyPhone", { visible: pages.phoneSettings })
       .label(settingsInfo, { visible: pages.phoneSettings })
-      .textField("ชื่อ IC", settingsName, { visible: pages.phoneSettings })
-      .button("บันทึกชื่อ IC", saveIcName, { visible: pages.phoneSettings })
+      .textField("ชื่อ IC", settingsName, { visible: pages.phoneSettings, disabled: icEditDisabled })
+      .button("บันทึกชื่อ IC", saveIcName, { visible: pages.phoneSettings, disabled: icEditDisabled })
       .button(lockButton, togglePhoneLock, { visible: pages.phoneSettings })
       .label(settingsStatus, { visible: pages.phoneSettings })
       .button("ย้อนกลับ", openHome, { visible: pages.phoneSettings })
@@ -3007,5 +3021,5 @@ system.runInterval(() => {
 }, 100);
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.15.20 — phone settings and PIN lock"
+  "[VCMumbleItem/BP] Loaded v2.15.21 — IC registration owner permission"
 );
