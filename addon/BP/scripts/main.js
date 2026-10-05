@@ -1104,7 +1104,7 @@ async function unlockPhone(player, phoneId) {
   const status = new ObservableString("");
   let unlocked = false, failures = 0;
   const form = new CustomForm(player, "SleepyPhone — ปลดล็อก")
-    .label("โทรศัพท์นี้ตั้งรหัสผ่านไว้\nกรอกรหัสตัวเลข 4 หลัก")
+    .label("\nโทรศัพท์นี้ตั้งรหัสผ่านไว้\n\nกรอกรหัสตัวเลข 4 หลัก\n")
     .textField("รหัสผ่าน", input)
     .label(status)
     .button("ปลดล็อก", () => {
@@ -1483,7 +1483,7 @@ async function showPhone(player, requestedAt = Date.now()) {
       settingsName.setData(activeProfile.icName);
       icEditDisabled.setData(!canEditPhoneIc(player, activeProfile.id));
       const lock = readPhoneLock(activeProfile.id);
-      settingsInfo.setData(`${icEditDisabled.getData() ? "ชื่อ IC แก้ได้เฉพาะผู้ลงทะเบียนครั้งแรก\n" : ""}เบอร์: ${activeProfile.number} (เปลี่ยนไม่ได้)\nรหัสผ่าน: ${lock ? "เปิด" : "ปิด"}`);
+      settingsInfo.setData(`\n${icEditDisabled.getData() ? "ชื่อ IC แก้ได้เฉพาะผู้ลงทะเบียนครั้งแรก\n\n" : ""}เบอร์: ${activeProfile.number} (เปลี่ยนไม่ได้)\n\nรหัสผ่าน: ${lock ? "เปิด" : "ปิด"}\n`);
       lockButton.setData(lock ? "ปิดการใช้รหัสผ่าน" : "เปิดการใช้รหัสผ่าน");
       showPage("phoneSettings");
     };
@@ -2111,7 +2111,7 @@ async function showPhone(player, requestedAt = Date.now()) {
       .label(settingsStatus, { visible: pages.phoneSettings })
       .button("ย้อนกลับ", openHome, { visible: pages.phoneSettings })
       .header("สร้างรหัสผ่าน", { visible: pages.createPin })
-      .label("รหัสตัวเลข 4 หลัก\nผู้ตั้งรหัสเข้าได้โดยไม่ต้องกรอก คนอื่นต้องกรอกรหัสก่อนใช้", { visible: pages.createPin })
+      .label("\nรหัสตัวเลข 4 หลัก\n\nผู้ตั้งรหัสเข้าได้โดยไม่ต้องกรอก\n\nคนอื่นต้องกรอกรหัสก่อนใช้\n", { visible: pages.createPin })
       .textField("รหัส 4 หลัก", newPin, { visible: pages.createPin })
       .textField("ยืนยันรหัส", confirmPin, { visible: pages.createPin })
       .label(settingsStatus, { visible: pages.createPin })
@@ -3021,5 +3021,5 @@ system.runInterval(() => {
 }, 100);
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.15.21 — IC registration owner permission"
+  "[VCMumbleItem/BP] Loaded v2.15.22 — phone settings text spacing"
 );
