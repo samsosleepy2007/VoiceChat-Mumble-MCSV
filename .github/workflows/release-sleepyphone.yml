@@ -1,4 +1,4 @@
-name: Release SleepyPhone v0.5.8
+name: Release SleepyPhone v0.5.9
 on:
   push:
     branches: [main]
@@ -7,7 +7,7 @@ permissions:
   contents: write
 jobs:
   release:
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release-v0.5.8]'))
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release-v0.5.9]'))
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -31,7 +31,7 @@ jobs:
           python3 -m build --wheel
           python3 tools/build_itemmic_addon.py
           mkdir out
-          cp dist/*.whl release-assets/VC_Mumble_ItemMic_v2.15.26_MicFix.mcaddon out/
+          cp dist/*.whl release-assets/VC_Mumble_ItemMic_v2.15.27_MicFix.mcaddon out/
       - name: Include existing VC Mumla client
         env:
           GH_TOKEN: ${{ github.token }}
@@ -41,4 +41,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           (cd out && sha256sum *.whl *.mcaddon *.apk > SHA256SUMS.txt)
-          gh release create v0.5.8 out/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title 'v0.5.8 — SleepyPhone Settings and Ringtones' --notes-file release-notes/v0.5.8.md --latest
+          gh release create v0.5.9 out/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title 'v0.5.9 — Personalized Phone Item Names' --notes-file release-notes/v0.5.9.md --latest
