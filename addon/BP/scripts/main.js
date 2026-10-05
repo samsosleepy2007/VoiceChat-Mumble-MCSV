@@ -3086,5 +3086,5 @@ system.runInterval(() => {
 }, 100);
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.15.27 — personalized phone item name"
+  "[VCMumbleItem/BP] Loaded v2.15.28 — credit card items"
 );

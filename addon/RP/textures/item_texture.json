@@ -28,6 +28,12 @@
     },
     "1000": {
       "textures": "textures/items/1000"
+    },
+    "BlackCard": {
+      "textures": "textures/items/BlackCard"
+    },
+    "WhiteCard": {
+      "textures": "textures/items/WhiteCard"
     }
   }
 }

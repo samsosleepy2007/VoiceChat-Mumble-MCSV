@@ -1,13 +1,13 @@
 {
   "format_version": 2,
   "header": {
-    "name": "VC Mumble Item Mic BP v2.15.27",
+    "name": "VC Mumble Item Mic BP v2.15.28",
     "description": "VC Mumble Item Mic with SleepyPhone contacts, Favorites, messaging, inbox, and DDUI. Includes six Money items (main hand only).",
     "uuid": "b6411120-cc4e-44a9-b28d-f43b10cafd86",
     "version": [
       2,
       15,
-      27
+      28
     ],
     "min_engine_version": [
       1,
@@ -22,7 +22,7 @@
       "version": [
         2,
         15,
-        27
+        28
       ]
     },
     {
@@ -32,7 +32,7 @@
       "version": [
         2,
         15,
-        27
+        28
       ],
       "entry": "scripts/main.js"
     }
@@ -51,7 +51,7 @@
       "version": [
         2,
         15,
-        27
+        28
       ]
     }
   ]

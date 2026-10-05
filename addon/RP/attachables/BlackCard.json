@@ -1,0 +1,41 @@
+{
+  "format_version": "1.10.0",
+  "minecraft:attachable": {
+    "description": {
+      "identifier": "custom:BlackCard",
+      "materials": {
+        "default": "armor",
+        "enchanted": "armor_enchanted"
+      },
+      "textures": {
+        "default": "textures/models/armor/BlackCard",
+        "enchanted": "textures/misc/enchanted_item_glint"
+      },
+      "geometry": {
+        "default": "geometry.BlackCard"
+      },
+      "scripts": {
+        "parent_setup": "variable.helmet_layer_visible = 0.0;",
+        "animate": [
+          "smooth_anim"
+        ],
+        "initialize": [
+          "variable.sy_QOYttffa = query.target_y_rotation;",
+          "variable.sx_AGYyNAjE = query.target_x_rotation;",
+          "variable.sys_mLnqlbBT = 0;"
+        ],
+        "pre_animation": [
+          "variable.sy_QOYttffa = math.lerp(variable.sy_QOYttffa, query.target_y_rotation, query.delta_time * 6.00);",
+          "variable.sx_AGYyNAjE = math.lerp(variable.sx_AGYyNAjE, math.clamp(query.target_x_rotation, -45, 30), query.delta_time * 6.00);",
+          "variable.sys_mLnqlbBT = math.lerp(variable.sys_mLnqlbBT, query.yaw_speed, query.delta_time * 15);"
+        ]
+      },
+      "render_controllers": [
+        "controller.render.armor"
+      ],
+      "animations": {
+        "smooth_anim": "animation.fehGxDdszBQhOXH"
+      }
+    }
+  }
+}

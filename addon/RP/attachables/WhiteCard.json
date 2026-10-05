@@ -1,0 +1,41 @@
+{
+  "format_version": "1.10.0",
+  "minecraft:attachable": {
+    "description": {
+      "identifier": "custom:WhiteCard",
+      "materials": {
+        "default": "armor",
+        "enchanted": "armor_enchanted"
+      },
+      "textures": {
+        "default": "textures/models/armor/WhiteCard",
+        "enchanted": "textures/misc/enchanted_item_glint"
+      },
+      "geometry": {
+        "default": "geometry.WhiteCard"
+      },
+      "scripts": {
+        "parent_setup": "variable.helmet_layer_visible = 0.0;",
+        "animate": [
+          "smooth_anim"
+        ],
+        "initialize": [
+          "variable.sy_IoeHWjrr = query.target_y_rotation;",
+          "variable.sx_ECvPhzkz = query.target_x_rotation;",
+          "variable.sys_rtqOBDkd = 0;"
+        ],
+        "pre_animation": [
+          "variable.sy_IoeHWjrr = math.lerp(variable.sy_IoeHWjrr, query.target_y_rotation, query.delta_time * 6.00);",
+          "variable.sx_ECvPhzkz = math.lerp(variable.sx_ECvPhzkz, math.clamp(query.target_x_rotation, -45, 30), query.delta_time * 6.00);",
+          "variable.sys_rtqOBDkd = math.lerp(variable.sys_rtqOBDkd, query.yaw_speed, query.delta_time * 15);"
+        ]
+      },
+      "render_controllers": [
+        "controller.render.armor"
+      ],
+      "animations": {
+        "smooth_anim": "animation.yXzflwGwSLGzYhW"
+      }
+    }
+  }
+}
