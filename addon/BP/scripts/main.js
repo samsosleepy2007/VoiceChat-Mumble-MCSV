@@ -2405,35 +2405,37 @@ function applyMicModeFromUi(
   });
 }
 
+const activeRangePreviews = new Map();
 function voiceRangePreviewParticleId(radius) {
   return VOICE_RANGE_PREVIEW_PREFIX + String(radius).padStart(3, "0");
 }
-
-function showVoiceRangePreview(player, rawRadius) {
-  const radius = Math.max(1, Math.min(150, Math.floor(Number(rawRadius) || 1)));
-  const particleId = voiceRangePreviewParticleId(radius);
-
-  let center;
+function renderVoiceRangePreview(player, radius, intro = false) {
   try {
-    center = player.location;
-  } catch {
-    return;
-  }
-
-  try {
-    // Static RP definitions avoid MolangVariableMap/runtime scaling entirely.
-    player.spawnParticle(
-      particleId,
-      { x: center.x, y: center.y + 0.04, z: center.z }
-    );
-    player.spawnParticle(
-      particleId,
-      { x: center.x, y: center.y + radius, z: center.z }
-    );
-  } catch {
-    // Preview failure must never block range updates or DDUI.
+    if (player.isValid === false) return false;
+    const center = player.location;
+    player.spawnParticle(intro ? "vcmumble:voice_range_intro_" + String(radius).padStart(3, "0") : voiceRangePreviewParticleId(radius), {
+      x: center.x, y: center.y + 0.9, z: center.z,
+    });
+    return true;
+  } catch (error) {
+    console.warn(`[SleepyMic] PARTICLE_SPAWN_FAIL player=${player.name} radius=${radius}: ${error}`);
+    return false;
   }
 }
+function showVoiceRangePreview(player, rawRadius) {
+  const radius = Math.max(1, Math.min(150, Math.floor(Number(rawRadius) || 1)));
+  if (!renderVoiceRangePreview(player, radius, true)) return;
+  activeRangePreviews.set(player.id, { player, radius, expiresAt: system.currentTick + 200, nextAt: system.currentTick + 20 });
+  console.warn(`[SleepyMic] RANGE_PREVIEW player=${player.name} radius=${radius} ttl=10s particle=${voiceRangePreviewParticleId(radius)}`);
+}
+system.runInterval(() => {
+  for (const [id, preview] of activeRangePreviews) {
+    if (system.currentTick >= preview.expiresAt || preview.player.isValid === false) { activeRangePreviews.delete(id); continue; }
+    if (system.currentTick < preview.nextAt) continue;
+    preview.nextAt = system.currentTick + 20;
+    if (!renderVoiceRangePreview(preview.player, preview.radius)) activeRangePreviews.delete(id);
+  }
+}, 20);
 
 const openSettingsPlayers = new Set();
 const openSettingsForms = new Map();
@@ -2751,6 +2753,7 @@ async function showSettings(player) {
             pendingRequestId = "";
             pendingRange = null;
             player.setDynamicProperty(PROP_VOICE_RANGE, value);
+            showVoiceRangePreview(player, value);
             startVoiceRangeCooldown(player);
             player.sendMessage(`[ SleepyMic ] เปลี่ยนระยะเป็น ${value} บล็อกแล้ว`);
             system.clearRun(refreshId);
@@ -2911,5 +2914,5 @@ system.runInterval(() => {
 }, 100);
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.15.16 — five-message chat and full history"
+  "[VCMumbleItem/BP] Loaded v2.15.19 — expanding private range preview"
 );

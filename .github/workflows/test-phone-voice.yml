@@ -29,4 +29,4 @@ jobs:
           name: sleepyphone-4-block-test
           path: |
             dist/*.whl
-            release-assets/VC_Mumble_ItemMic_v2.15.16_MicFix.mcaddon
+            release-assets/VC_Mumble_ItemMic_v2.15.19_MicFix.mcaddon
