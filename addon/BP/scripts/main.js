@@ -975,8 +975,21 @@ function clearPhoneCallTags(player) {
   if (!player) return;
   for (const tag of player.getTags()) if (tag.startsWith(PHONE_CALL_TAG)) player.removeTag(tag);
 }
+function playPhoneRingtone(call) {
+  const receiver = callPlayer(call.b);
+  if (!receiver || call.state !== "ringing") return;
+  call.ringtone = "sleepyphone.ringtone.deltarune";
+  try { receiver.playSound(call.ringtone, { volume: 1, pitch: 1 }); } catch {}
+  call.nextRingTick = system.currentTick + 502;
+}
+function stopPhoneRingtone(call) {
+  const receiver = callPlayer(call.b);
+  if (receiver && call.ringtone) { try { receiver.runCommand(`stopsound @s ${call.ringtone}`); } catch {} }
+  call.nextRingTick = undefined;
+}
 function endPhoneCall(call, reason = "วางสายแล้ว", kind = "normal") {
   if (!call || !phoneCalls.has(call.id)) return;
+  stopPhoneRingtone(call);
   phoneCalls.delete(call.id);
   for (const id of [call.a, call.b]) {
     playerPhoneCalls.delete(id);
@@ -1003,6 +1016,7 @@ function startPhoneCall(player, ownProfile, targetProfile, anonymous) {
   playerPhoneCalls.set(call.a, call.id); playerPhoneCalls.set(call.b, call.id);
   try { enterPhoneVoice(player); }
   catch { endPhoneCall(call, "เปิดไมค์สำหรับการโทรไม่สำเร็จ", "error"); return "เปิดไมค์สำหรับการโทรไม่สำเร็จ"; }
+  playPhoneRingtone(call);
   phoneChat(player, `กำลังโทรไปที่เบอร์ ${targetProfile.number} ใช้โทรศัพท์เพื่อดูสถานะ`);
   const identity = incomingCallIdentity(targetProfile.id, ownProfile.id, ownProfile.number, anonymous);
   phoneChat(target, `มีสายเข้าจาก ${identity} ใช้โทรศัพท์เพื่อรับหรือตัดสาย`, "warning");
@@ -1021,6 +1035,7 @@ function acceptPhoneCall(player) {
     clearPhoneCallTags(a); clearPhoneCallTags(b);
     a.addTag(`${PHONE_CALL_TAG}${call.id}.a.0`);
     b.addTag(`${PHONE_CALL_TAG}${call.id}.b.0`);
+    stopPhoneRingtone(call);
     call.state = "active";
     phoneChat(a, "รับสายแล้ว คุยกันได้โดยไม่จำกัดระยะ");
     phoneChat(b, "รับสายแล้ว คุยกันได้โดยไม่จำกัดระยะ");
@@ -1045,6 +1060,7 @@ system.runInterval(() => {
     const a = callPlayer(call.a), b = callPlayer(call.b);
     if (!a || !b) { endPhoneCall(call, "ปลายสายออกจากเซิร์ฟเวอร์แล้ว", "error"); continue; }
     if (call.state === "ringing" && system.currentTick >= call.expires) { endPhoneCall(call, "ไม่มีผู้รับสาย", "warning"); continue; }
+    if (call.state === "ringing" && system.currentTick >= call.nextRingTick) playPhoneRingtone(call);
     if (heldPhoneData(a)?.id !== call.phoneA ||
         (call.state === "active" && heldPhoneData(b)?.id !== call.phoneB)) {
       endPhoneCall(call, "สายหลุด เพราะไม่ได้ถือโทรศัพท์ไว้", "error");
@@ -2108,6 +2124,8 @@ async function showPhone(player, requestedAt = Date.now()) {
 
       .header("ตั้งค่า SleepyPhone", { visible: pages.phoneSettings })
       .label(settingsInfo, { visible: pages.phoneSettings })
+      .label("\nRingtone: Deltarune (ค่าเริ่มต้น)\n", { visible: pages.phoneSettings })
+      .button("Undertale - Ringtone", () => settingsStatus.setData("\nยังไม่มีไฟล์เสียง Undertale ในแพ็กนี้\n"), { visible: pages.phoneSettings })
       .textField("ชื่อ IC", settingsName, { visible: pages.phoneSettings, disabled: icEditDisabled })
       .textField("เบอร์โทรศัพท์", settingsNumber, { visible: pages.phoneSettings, disabled: settingsNumberDisabled })
       .button("บันทึกชื่อ IC", saveIcName, { visible: pages.phoneSettings, disabled: icEditDisabled })
@@ -3025,5 +3043,5 @@ system.runInterval(() => {
 }, 100);
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.15.22 — phone settings text spacing"
+  "[VCMumbleItem/BP] Loaded v2.15.23 — Deltarune incoming ringtone"
 );
