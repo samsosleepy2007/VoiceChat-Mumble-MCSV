@@ -2409,11 +2409,11 @@ const activeRangePreviews = new Map();
 function voiceRangePreviewParticleId(radius) {
   return VOICE_RANGE_PREVIEW_PREFIX + String(radius).padStart(3, "0");
 }
-function renderVoiceRangePreview(player, radius) {
+function renderVoiceRangePreview(player, radius, intro = false) {
   try {
     if (player.isValid === false) return false;
     const center = player.location;
-    player.spawnParticle(voiceRangePreviewParticleId(radius), {
+    player.spawnParticle(intro ? "vcmumble:voice_range_intro_" + String(radius).padStart(3, "0") : voiceRangePreviewParticleId(radius), {
       x: center.x, y: center.y + 0.9, z: center.z,
     });
     return true;
@@ -2424,7 +2424,7 @@ function renderVoiceRangePreview(player, radius) {
 }
 function showVoiceRangePreview(player, rawRadius) {
   const radius = Math.max(1, Math.min(150, Math.floor(Number(rawRadius) || 1)));
-  if (!renderVoiceRangePreview(player, radius)) return;
+  if (!renderVoiceRangePreview(player, radius, true)) return;
   activeRangePreviews.set(player.id, { player, radius, expiresAt: system.currentTick + 200, nextAt: system.currentTick + 20 });
   console.warn(`[SleepyMic] RANGE_PREVIEW player=${player.name} radius=${radius} ttl=10s particle=${voiceRangePreviewParticleId(radius)}`);
 }
@@ -2914,5 +2914,5 @@ system.runInterval(() => {
 }, 100);
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.15.18 — restored static private range preview"
+  "[VCMumbleItem/BP] Loaded v2.15.19 — expanding private range preview"
 );
