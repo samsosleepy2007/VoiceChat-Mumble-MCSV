@@ -1473,6 +1473,8 @@ async function showPhone(player, requestedAt = Date.now()) {
     };
 
     const icEditDisabled = new ObservableBoolean(true);
+    const settingsNumber = new ObservableString("");
+    const settingsNumberDisabled = new ObservableBoolean(true);
     const settingsName = new ObservableString("", { clientWritable: true });
     const settingsInfo = new ObservableString("");
     const settingsStatus = new ObservableString("");
@@ -1481,9 +1483,10 @@ async function showPhone(player, requestedAt = Date.now()) {
     const lockButton = new ObservableString("");
     const refreshPhoneSettings = () => {
       settingsName.setData(activeProfile.icName);
+      settingsNumber.setData(activeProfile.number);
       icEditDisabled.setData(!canEditPhoneIc(player, activeProfile.id));
       const lock = readPhoneLock(activeProfile.id);
-      settingsInfo.setData(`\n${icEditDisabled.getData() ? "ชื่อ IC แก้ได้เฉพาะผู้ลงทะเบียนครั้งแรก\n\n" : ""}เบอร์: ${activeProfile.number} (เปลี่ยนไม่ได้)\n\nรหัสผ่าน: ${lock ? "เปิด" : "ปิด"}\n`);
+      settingsInfo.setData(`\n${icEditDisabled.getData() ? "ชื่อ IC แก้ได้เฉพาะผู้ลงทะเบียนครั้งแรก\n\n" : ""}รหัสผ่าน: ${lock ? "เปิด" : "ปิด"}\n`);
       lockButton.setData(lock ? "ปิดการใช้รหัสผ่าน" : "เปิดการใช้รหัสผ่าน");
       showPage("phoneSettings");
     };
@@ -2106,6 +2109,7 @@ async function showPhone(player, requestedAt = Date.now()) {
       .header("ตั้งค่า SleepyPhone", { visible: pages.phoneSettings })
       .label(settingsInfo, { visible: pages.phoneSettings })
       .textField("ชื่อ IC", settingsName, { visible: pages.phoneSettings, disabled: icEditDisabled })
+      .textField("เบอร์โทรศัพท์", settingsNumber, { visible: pages.phoneSettings, disabled: settingsNumberDisabled })
       .button("บันทึกชื่อ IC", saveIcName, { visible: pages.phoneSettings, disabled: icEditDisabled })
       .button(lockButton, togglePhoneLock, { visible: pages.phoneSettings })
       .label(settingsStatus, { visible: pages.phoneSettings })
