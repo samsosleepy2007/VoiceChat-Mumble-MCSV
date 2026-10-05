@@ -935,6 +935,7 @@ function notifyPhoneRecipient(phoneId, message) {
   for (const target of world.getAllPlayers()) {
     if (!playerHasPhoneId(target, phoneId)) continue;
     try {
+      try { target.playSound("sleepyphone.notification", { volume: 1, pitch: 1 }); } catch {}
       phoneChat(target, `มีข้อความจาก ${senderName && !message.anonymous ? senderName + " (" + senderNumber + ")" : senderNumber}`, "warning");
     } catch {}
   }
@@ -975,8 +976,50 @@ function clearPhoneCallTags(player) {
   if (!player) return;
   for (const tag of player.getTags()) if (tag.startsWith(PHONE_CALL_TAG)) player.removeTag(tag);
 }
+function phoneRingtone(phoneId) {
+  const choice = world.getDynamicProperty("vcmphone:ringtone:" + phoneId);
+  return ["undertale", "your_phone_linging"].includes(choice) ? choice : "deltarune";
+}
+const ringtonePreviews = new Map();
+function stopRingtonePreview(player) {
+  const preview = ringtonePreviews.get(player.id);
+  if (!preview) return;
+  system.clearRun(preview.job);
+  try { player.runCommand(`stopsound @s ${preview.sound}`); } catch {}
+  ringtonePreviews.delete(player.id);
+}
+function previewRingtone(player, choice) {
+  stopRingtonePreview(player);
+  if (phoneCallFor(player)?.state === "ringing") return;
+  const sound = "sleepyphone.ringtone." + choice;
+  try { player.playSound(sound, { volume: 1, pitch: 1 }); } catch { return; }
+  const ticks = choice === "deltarune" ? 100 : choice === "undertale" ? 21 : 327;
+  const job = system.runTimeout(() => {
+    const preview = ringtonePreviews.get(player.id);
+    if (preview?.job !== job) return;
+    if (choice === "deltarune") { try { player.runCommand(`stopsound @s ${sound}`); } catch {} }
+    ringtonePreviews.delete(player.id);
+  }, ticks);
+  ringtonePreviews.set(player.id, { sound, job });
+}
+function playPhoneRingtone(call) {
+  const receiver = callPlayer(call.b);
+  if (!receiver || call.state !== "ringing") return;
+  stopRingtonePreview(receiver);
+  const choice = call.ringtoneChoice || phoneRingtone(call.phoneB);
+  call.ringtoneChoice = choice;
+  call.ringtone = "sleepyphone.ringtone." + choice;
+  try { receiver.playSound(call.ringtone, { volume: 1, pitch: 1 }); } catch {}
+  call.nextRingTick = system.currentTick + (choice === "undertale" ? 21 : choice === "your_phone_linging" ? 327 : 502);
+}
+function stopPhoneRingtone(call) {
+  const receiver = callPlayer(call.b);
+  if (receiver && call.ringtone) { try { receiver.runCommand(`stopsound @s ${call.ringtone}`); } catch {} }
+  call.nextRingTick = undefined;
+}
 function endPhoneCall(call, reason = "วางสายแล้ว", kind = "normal") {
   if (!call || !phoneCalls.has(call.id)) return;
+  stopPhoneRingtone(call);
   phoneCalls.delete(call.id);
   for (const id of [call.a, call.b]) {
     playerPhoneCalls.delete(id);
@@ -1003,6 +1046,7 @@ function startPhoneCall(player, ownProfile, targetProfile, anonymous) {
   playerPhoneCalls.set(call.a, call.id); playerPhoneCalls.set(call.b, call.id);
   try { enterPhoneVoice(player); }
   catch { endPhoneCall(call, "เปิดไมค์สำหรับการโทรไม่สำเร็จ", "error"); return "เปิดไมค์สำหรับการโทรไม่สำเร็จ"; }
+  playPhoneRingtone(call);
   phoneChat(player, `กำลังโทรไปที่เบอร์ ${targetProfile.number} ใช้โทรศัพท์เพื่อดูสถานะ`);
   const identity = incomingCallIdentity(targetProfile.id, ownProfile.id, ownProfile.number, anonymous);
   phoneChat(target, `มีสายเข้าจาก ${identity} ใช้โทรศัพท์เพื่อรับหรือตัดสาย`, "warning");
@@ -1021,6 +1065,7 @@ function acceptPhoneCall(player) {
     clearPhoneCallTags(a); clearPhoneCallTags(b);
     a.addTag(`${PHONE_CALL_TAG}${call.id}.a.0`);
     b.addTag(`${PHONE_CALL_TAG}${call.id}.b.0`);
+    stopPhoneRingtone(call);
     call.state = "active";
     phoneChat(a, "รับสายแล้ว คุยกันได้โดยไม่จำกัดระยะ");
     phoneChat(b, "รับสายแล้ว คุยกันได้โดยไม่จำกัดระยะ");
@@ -1045,6 +1090,7 @@ system.runInterval(() => {
     const a = callPlayer(call.a), b = callPlayer(call.b);
     if (!a || !b) { endPhoneCall(call, "ปลายสายออกจากเซิร์ฟเวอร์แล้ว", "error"); continue; }
     if (call.state === "ringing" && system.currentTick >= call.expires) { endPhoneCall(call, "ไม่มีผู้รับสาย", "warning"); continue; }
+    if (call.state === "ringing" && system.currentTick >= call.nextRingTick) playPhoneRingtone(call);
     if (heldPhoneData(a)?.id !== call.phoneA ||
         (call.state === "active" && heldPhoneData(b)?.id !== call.phoneB)) {
       endPhoneCall(call, "สายหลุด เพราะไม่ได้ถือโทรศัพท์ไว้", "error");
@@ -1078,6 +1124,46 @@ function phonePageForm(player, title) {
   return proxy;
 }
 
+function phoneIcOwner(phoneId) {
+  const owner = world.getDynamicProperty("vcmphone:ic_owner:" + phoneId);
+  return typeof owner === "string" ? owner : "";
+}
+function canEditPhoneIc(player, phoneId) {
+  const owner = phoneIcOwner(phoneId);
+  return !!owner && owner.toLowerCase() === player.name.toLowerCase();
+}
+
+function readPhoneLock(phoneId) {
+  const raw = world.getDynamicProperty("vcmphone:lock:" + phoneId);
+  if (!raw) return undefined;
+  const lock = JSON.parse(raw);
+  if (!/^\d{4}$/.test(lock.pin) || !lock.owner) throw new Error("ข้อมูลรหัสโทรศัพท์ไม่ถูกต้อง");
+  return lock;
+}
+function writePhoneLock(phoneId, pin, owner) {
+  world.setDynamicProperty("vcmphone:lock:" + phoneId, pin ? JSON.stringify({ pin, owner }) : undefined);
+}
+async function unlockPhone(player, phoneId) {
+  const lock = readPhoneLock(phoneId);
+  if (!lock || lock.owner.toLowerCase() === player.name.toLowerCase()) return true;
+  const input = new ObservableString("", { clientWritable: true });
+  const status = new ObservableString("");
+  let unlocked = false, failures = 0;
+  const form = new CustomForm(player, "SleepyPhone — ปลดล็อก")
+    .label("\nโทรศัพท์นี้ตั้งรหัสผ่านไว้\n\nกรอกรหัสตัวเลข 4 หลัก\n")
+    .textField("รหัสผ่าน", input)
+    .label(status)
+    .button("ปลดล็อก", () => {
+      const current = readPhoneLock(phoneId);
+      if (!current || input.getData() === current.pin) { unlocked = true; form.close(); return; }
+      input.setData(""); failures++;
+      status.setData("รหัสผ่านไม่ถูกต้อง");
+      if (failures >= 5) { phoneChat(player, "รหัสไม่ถูกต้อง กรุณาลองใหม่ภายหลัง", "error"); form.close(); }
+    }).closeButton();
+  await form.show();
+  return unlocked;
+}
+
 async function showPhone(player, requestedAt = Date.now()) {
   if (!player) return;
   if (openPhonePlayers.has(player.id)) return;
@@ -1094,10 +1180,11 @@ async function showPhone(player, requestedAt = Date.now()) {
 
   openPhonePlayers.add(player.id);
   try {
+    if (initial.profile && !await unlockPhone(player, initial.profile.id)) return;
     const pageNames = [
       "setupName", "setupNumber", "home", "bank", "sendMethod", "sendNumber", "contacts",
       "addContact", "contactDetail", "deleteContact", "compose", "inbox", "messageDetail",
-      "callMethod", "callNumber", "callContacts", "callStatus", "contactsApp", "editContact", "callConfirm", "deleteChat",
+      "callMethod", "callNumber", "callContacts", "callStatus", "contactsApp", "editContact", "callConfirm", "deleteChat", "phoneSettings", "createPin",
     ];
     const pages = Object.fromEntries(
       pageNames.map((name) => [name, new ObservableBoolean(false)])
@@ -1393,6 +1480,8 @@ async function showPhone(player, requestedAt = Date.now()) {
       try {
         setPhoneItemIdentity(slot, profile);
         writePhoneProfile(profile);
+        world.setDynamicProperty("vcmphone:ic_owner:" + profile.id, player.name);
+        slot.setDynamicProperty("vcmphone:ic_owner", player.name);
       } catch (e) {
         console.warn(`[VCMumbleItem/BP] phone registration failed player=${player.name}: ${e}`);
         setupStatus.setData("\n§cลงทะเบียนโทรศัพท์ไม่สำเร็จ กรุณาลองใหม่§r\n");
@@ -1427,6 +1516,67 @@ async function showPhone(player, requestedAt = Date.now()) {
       }
       numberInput.setData(number);
       finishRegistration(number);
+    };
+
+    const icEditDisabled = new ObservableBoolean(true);
+    const ringtoneLabel = new ObservableString("");
+    const settingsNumber = new ObservableString("", { clientWritable: true });
+    const settingsNumberDisabled = new ObservableBoolean(true);
+    const settingsName = new ObservableString("", { clientWritable: true });
+    const settingsInfo = new ObservableString("");
+    const settingsStatus = new ObservableString("");
+    const newPin = new ObservableString("", { clientWritable: true });
+    const confirmPin = new ObservableString("", { clientWritable: true });
+    const lockButton = new ObservableString("");
+    const refreshPhoneSettings = () => {
+      ringtoneLabel.setData("\nRingtone: " + (phoneRingtone(activeProfile.id) === "undertale" ? "Undertale - Ringtone" : phoneRingtone(activeProfile.id) === "your_phone_linging" ? "YOUR_PHONE_LINGING" : "Deltarune (ค่าเริ่มต้น)") + "\n");
+      settingsName.setData(activeProfile.icName);
+      settingsNumber.setData(activeProfile.number);
+      icEditDisabled.setData(!canEditPhoneIc(player, activeProfile.id));
+      const lock = readPhoneLock(activeProfile.id);
+      settingsInfo.setData(`\n${icEditDisabled.getData() ? "ชื่อ IC แก้ได้เฉพาะผู้ลงทะเบียนครั้งแรก\n\n" : ""}รหัสผ่าน: ${lock ? "เปิด" : "ปิด"}\n`);
+      lockButton.setData(lock ? "ปิดการใช้รหัสผ่าน" : "เปิดการใช้รหัสผ่าน");
+      showPage("phoneSettings");
+    };
+    const settingsPhoneSlot = () => {
+      const current = resolvePhoneProfile(player);
+      if (!current.slot || current.profile?.id !== activeProfile.id) throw new Error("กรุณาถือโทรศัพท์เครื่องเดิม");
+      return current.slot;
+    };
+    const saveIcName = () => {
+      try {
+        const slot = settingsPhoneSlot();
+        if (!canEditPhoneIc(player, activeProfile.id)) throw new Error("เฉพาะผู้ตั้งชื่อ IC ครั้งแรกเท่านั้นที่แก้ไขได้");
+        const name = normalizeIcName(settingsName.getData());
+        if (!name) throw new Error("ชื่อ IC ไม่ถูกต้องหรือยาวเกินกำหนด");
+        const profile = { ...activeProfile, icName: name };
+        writePhoneProfile(profile); setPhoneItemIdentity(slot, profile);
+        activeProfile = profile; refreshIdentityText(); settingsStatus.setData("บันทึกชื่อ IC แล้ว");
+      } catch (e) { settingsStatus.setData(String(e.message || e)); }
+    };
+    const chooseRingtone = (choice) => {
+      try {
+        settingsPhoneSlot();
+        world.setDynamicProperty("vcmphone:ringtone:" + activeProfile.id, choice);
+        refreshPhoneSettings(); previewRingtone(player, choice); settingsStatus.setData("\nบันทึก Ringtone แล้ว\n");
+      } catch (e) { settingsStatus.setData(String(e.message || e)); }
+    };
+    const togglePhoneLock = () => {
+      try {
+        settingsPhoneSlot(); settingsStatus.setData("");
+        if (readPhoneLock(activeProfile.id)) { writePhoneLock(activeProfile.id); refreshPhoneSettings(); }
+        else { newPin.setData(""); confirmPin.setData(""); showPage("createPin"); }
+      } catch (e) { settingsStatus.setData(String(e.message || e)); }
+    };
+    const savePhonePin = () => {
+      try {
+        const slot = settingsPhoneSlot(), pin = newPin.getData();
+        if (!/^\d{4}$/.test(pin)) throw new Error("รหัสต้องเป็นตัวเลข 4 หลัก");
+        if (pin !== confirmPin.getData()) throw new Error("รหัสยืนยันไม่ตรงกัน");
+        writePhoneLock(activeProfile.id, pin, player.name);
+        slot.setDynamicProperty("vcmphone:pin_owner", player.name);
+        newPin.setData(""); confirmPin.setData(""); refreshPhoneSettings(); settingsStatus.setData("เปิดใช้รหัสผ่านแล้ว");
+      } catch (e) { settingsStatus.setData(String(e.message || e)); }
     };
 
     const openHome = () => {
@@ -1882,7 +2032,7 @@ async function showPhone(player, requestedAt = Date.now()) {
         bankStatus.setData("");
         showPage("bank");
       }, { visible: pages.home })
-      .button("ตั้งค่า", () => homeStatus.setData("\nApplication ตั้งค่าเตรียมไว้สำหรับพัฒนาต่อ\n"), { visible: pages.home })
+      .button("ตั้งค่า", () => { settingsStatus.setData(""); refreshPhoneSettings(); }, { visible: pages.home })
       .spacer({ visible: pages.home })
       .header("Favorites", { visible: pages.home })
       .label(favoritesInfo, { visible: pages.home });
@@ -2010,6 +2160,26 @@ async function showPhone(player, requestedAt = Date.now()) {
       .label(deleteContactText, { visible: pages.deleteContact })
       .button("ยืนยันลบรายชื่อ", confirmDeleteContact, { visible: pages.deleteContact })
       .button("ยกเลิก", () => showPage("contactDetail"), { visible: pages.deleteContact })
+
+      .header("ตั้งค่า SleepyPhone", { visible: pages.phoneSettings })
+      .label(settingsInfo, { visible: pages.phoneSettings })
+      .label(ringtoneLabel, { visible: pages.phoneSettings })
+      .button("Deltarune - Ringtone", () => chooseRingtone("deltarune"), { visible: pages.phoneSettings })
+      .button("Undertale - Ringtone", () => chooseRingtone("undertale"), { visible: pages.phoneSettings })
+      .button("YOUR_PHONE_LINGING", () => chooseRingtone("your_phone_linging"), { visible: pages.phoneSettings })
+      .textField("ชื่อ IC", settingsName, { visible: pages.phoneSettings, disabled: icEditDisabled })
+      .textField("เบอร์โทรศัพท์", settingsNumber, { visible: pages.phoneSettings, disabled: settingsNumberDisabled })
+      .button("บันทึกชื่อ IC", saveIcName, { visible: pages.phoneSettings, disabled: icEditDisabled })
+      .button(lockButton, togglePhoneLock, { visible: pages.phoneSettings })
+      .label(settingsStatus, { visible: pages.phoneSettings })
+      .button("ย้อนกลับ", openHome, { visible: pages.phoneSettings })
+      .header("สร้างรหัสผ่าน", { visible: pages.createPin })
+      .label("\nรหัสตัวเลข 4 หลัก\n\nผู้ตั้งรหัสเข้าได้โดยไม่ต้องกรอก\n\nคนอื่นต้องกรอกรหัสก่อนใช้\n", { visible: pages.createPin })
+      .textField("รหัส 4 หลัก", newPin, { visible: pages.createPin })
+      .textField("ยืนยันรหัส", confirmPin, { visible: pages.createPin })
+      .label(settingsStatus, { visible: pages.createPin })
+      .button("บันทึกรหัสผ่าน", savePhonePin, { visible: pages.createPin })
+      .button("ยกเลิก", refreshPhoneSettings, { visible: pages.createPin })
 
       .header("เขียนข้อความ", { visible: pages.compose })
       .label(composeRecipientText, { visible: pages.compose })
@@ -2914,5 +3084,5 @@ system.runInterval(() => {
 }, 100);
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.15.19 — expanding private range preview"
+  "[VCMumbleItem/BP] Loaded v2.15.26 — fix disabled phone number text field"
 );

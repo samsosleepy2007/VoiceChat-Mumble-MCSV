@@ -1,0 +1,40 @@
+{
+  "format_version": "1.14.0",
+  "sound_definitions": {
+    "sleepyphone.ringtone.deltarune": {
+      "category": "ui",
+      "sounds": [
+        {
+          "name": "sounds/sleepyphone/deltarune_ringtone",
+          "stream": true
+        }
+      ]
+    },
+    "sleepyphone.ringtone.undertale": {
+      "category": "ui",
+      "sounds": [
+        {
+          "name": "sounds/sleepyphone/undertale_ringtone",
+          "stream": true
+        }
+      ]
+    },
+    "sleepyphone.notification": {
+      "category": "ui",
+      "sounds": [
+        {
+          "name": "sounds/sleepyphone/notification"
+        }
+      ]
+    },
+    "sleepyphone.ringtone.your_phone_linging": {
+      "category": "ui",
+      "sounds": [
+        {
+          "name": "sounds/sleepyphone/your_phone_linging",
+          "stream": true
+        }
+      ]
+    }
+  }
+}
