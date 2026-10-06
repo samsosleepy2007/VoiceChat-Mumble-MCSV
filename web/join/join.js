@@ -16,12 +16,18 @@ if (typeof document !== 'undefined' && document.getElementById('server')) {
     el('server').textContent = address;
 
     for (const id of ['copy', 'other']) el(id).hidden = false;
-    el('other').addEventListener('click', () => { el('username-form').hidden = false; el('other').hidden = true; el('xbox').focus(); });
-    el('cancel-name').addEventListener('click', () => { el('username-form').hidden = true; el('other').hidden = false; });
     el('username-form').addEventListener('submit', event => {
       event.preventDefault();
       const name = el('xbox').value.trim();
-      if (!name || name.length > 32 || /[\x00-\x1f\x7f§]/.test(name)) { el('status').textContent = 'กรุณากรอกชื่อ Xbox ให้ถูกต้อง'; return; }
+      if (!name || name.length > 32 || /[\x00-\x1f\x7f§]/.test(name)) {
+        el('status').textContent = !name ? 'กรุณากรอกชื่อ Xbox ก่อนเปิดแอป' : 'กรุณากรอกชื่อ Xbox ให้ถูกต้อง';
+        el('status').classList.add('error');
+        el('xbox').setAttribute('aria-invalid', 'true');
+        el('xbox').focus();
+        return;
+      }
+      el('status').classList.remove('error');
+      el('xbox').removeAttribute('aria-invalid');
       el('status').textContent = 'กำลังเปิดแอปด้วยชื่อ ' + name;
       location.href = `mumble://${encodeURIComponent(name)}@${address}/`;
     });
