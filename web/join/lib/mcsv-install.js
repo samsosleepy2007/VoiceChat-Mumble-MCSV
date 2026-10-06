@@ -45,13 +45,14 @@ async function findExisting(client,root,worldFiles,world){
  for(let i=0;i<paths.length;i+=25){
   const data=await client.call('files_read_many',{paths:paths.slice(i,i+25)});if(!Array.isArray(data.files)||data.files.length!==paths.slice(i,i+25).length)fail('unverified');
   for(const file of data.files){
+   if(typeof file.path!=='string'||!paths.slice(i,i+25).includes('/'+file.path.replace(/^\//,'')))fail('unverified');
    if(file.denied)fail('permission');if(file.truncated)fail('unverified');
    if(typeof file.content!=='string'){if(reserved.has('/'+file.path.replace(/^\//,'')))fail('unsafe_layout');if(file.error&&!/not found|ไม่พบ|ไม่มี|no such/i.test(file.error))fail('unverified');continue;}
    let manifest;try{manifest=JSON.parse(file.content);}catch{fail('invalid_pack_list');}
    const reservedUUID=reserved.get('/'+file.path.replace(/^\//,''));if(reservedUUID&&manifest.header?.uuid?.toLowerCase()!==reservedUUID)fail('unsafe_layout');const pack=PACKS.find(p=>p.uuid===manifest.header?.uuid?.toLowerCase());if(!pack)continue;
    if(found[pack.type])fail('duplicate_pack');
    if(JSON.stringify(manifest.header.version)!==JSON.stringify(VERSION))fail('existing_version');
-   found[pack.type]=true;
+   found[pack.type]=file.path.replace(/^\//,'').replace(/\/manifest\.json$/,'');
   }
  }
  return found;
@@ -101,17 +102,18 @@ export async function installOnMCSV(client,body,loadArtifacts){
  try{
   const source=await loadArtifacts();const internal=plan.internal;
   const backupFiles=Object.values(internal.packLists).filter(p=>p.exists).map(p=>p.path.slice(1));
+  for(const path of Object.values(internal.existing))backupFiles.push(path);
   if(internal.config!==null)backupFiles.push('plugins/mumble_host/config.toml');
   if(internal.pluginFiles.some(f=>f.name===WHEEL))backupFiles.push('plugins/'+WHEEL);
   const backup='SleepyMumla-backup-'+randomUUID()+'.zip';stage='backup';if(backupFiles.length)await client.call('files_compress',{root:'/',files:backupFiles,name:backup});
   // Recheck immediately before the first write. The panel must keep the server offline.
   const runtime=await client.call('server_overview');if(runtime.info?.id!==plan.server.id||runtime.runtime?.current_state!=='offline')fail('server_running');
-  stage='packs';const archiveFiles={};for(const pack of PACKS)if(!internal.existing[pack.type])for(const [name,data] of Object.entries(source.packs[pack.type]))archiveFiles[pack.type+'_packs/'+pack.folder+'/'+name]=data;
+  stage='packs';const archiveFiles={};for(const pack of PACKS)for(const [name,data] of Object.entries(source.packs[pack.type]))archiveFiles[(internal.existing[pack.type]||pack.type+'_packs/'+pack.folder)+'/'+name]=data;
   if(Object.keys(archiveFiles).length){const archive='SleepyMumla-packs-'+randomUUID()+'.zip';mutated=true;await client.call('files_upload_base64',{path:'/'+archive,content_base64:Buffer.from(zipSync(archiveFiles,{level:6})).toString('base64')});await client.call('files_decompress',{root:'/',file:archive});}
   stage='plugin';mutated=true;await client.call('files_upload_base64',{path:'/plugins/'+WHEEL,content_base64:source.wheel.toString('base64')});
   stage='config';const configPath='/plugins/mumble_host/config.toml';if(internal.config!==null){const edit=configEdit(internal.config,body.voicePort);if(edit.old_string!==edit.new_string)await client.call('files_edit',{path:configPath,edits:[edit]});}else await client.call('files_write',{path:configPath,force_new:true,content:'[tracking]\ninterval_ticks = 4\nposition_epsilon = 0.05\nrotation_epsilon = 1.0\nheartbeat_seconds = 2\n\n[mumble]\nport = '+body.voicePort+'\nusers = 20\n\n[local_state]\nhost = "127.0.0.1"\nport = 47855\nmax_queue = 4096\n\n[voice]\ndefault_range = 30\nmax_range = 60\ndefault_attenuation_level = 3\n'});
   stage='world';for(const pack of PACKS){const item=internal.packLists[pack.type],content=mergePacks(item.content,pack.uuid);if(item.exists){if(item.content!==content)await client.call('files_edit',{path:item.path,edits:[{old_string:item.content,new_string:content}]});}else await client.call('files_write',{path:item.path,content});}
-  stage='verify';for(const pack of PACKS){const list=JSON.parse(await read(client,internal.packLists[pack.type].path));if(!list.some(p=>p.pack_id===pack.uuid&&JSON.stringify(p.version)===JSON.stringify(VERSION)))fail('verification_failed');if(!internal.existing[pack.type]){const manifest=JSON.parse(await read(client,'/'+pack.type+'_packs/'+pack.folder+'/manifest.json'));if(manifest.header?.uuid!==pack.uuid)fail('verification_failed');}}
+  stage='verify';for(const pack of PACKS){const list=JSON.parse(await read(client,internal.packLists[pack.type].path));if(!list.some(p=>p.pack_id===pack.uuid&&JSON.stringify(p.version)===JSON.stringify(VERSION)))fail('verification_failed');const target=internal.existing[pack.type]||pack.type+'_packs/'+pack.folder;const manifest=JSON.parse(await read(client,'/'+target+'/manifest.json'));if(manifest.header?.uuid!==pack.uuid)fail('verification_failed');}
   const files=await listing(client,'/plugins');if(!files.some(f=>f.name===WHEEL&&f.size===source.wheel.length))fail('verification_failed');
   const uploaded=await client.call('files_read_base64',{path:'/plugins/'+WHEEL});if(typeof uploaded.content_base64!=='string'||createHash('sha256').update(Buffer.from(uploaded.content_base64,'base64')).digest('hex')!==createHash('sha256').update(source.wheel).digest('hex'))fail('verification_failed');
   const confirmed=await read(client,configPath);const edit=configEdit(confirmed,body.voicePort);if(edit.old_string!==edit.new_string)fail('verification_failed');
