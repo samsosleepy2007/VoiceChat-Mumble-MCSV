@@ -369,22 +369,7 @@ public class MumlaActivity extends AppCompatActivity implements ListView.OnItemC
             }
         }
 
-        // If we're given a Mumble URL to show, open up a server edit fragment.
-        if (getIntent() != null &&
-                Intent.ACTION_VIEW.equals(getIntent().getAction())) {
-            String url = getIntent().getDataString();
-            try {
-                Server server = MumbleURLParser.parseURL(url);
-
-                // Open a dialog prompting the user to connect to the Mumble server.
-                DialogFragment fragment = ServerEditFragment.createServerEditDialog(
-                        MumlaActivity.this, server, ServerEditFragment.Action.CONNECT_ACTION, true);
-                fragment.show(getSupportFragmentManager(), "url_edit");
-            } catch (MalformedURLException e) {
-                Toast.makeText(this, getString(R.string.mumble_url_parse_failed), Toast.LENGTH_LONG).show();
-                e.printStackTrace();
-            }
-        }
+        if (savedInstanceState == null) handleVcJoinIntent(getIntent());
 
         setVolumeControlStream(mSettings.isHandsetMode() ?
                 AudioManager.STREAM_VOICE_CALL : AudioManager.STREAM_MUSIC);
@@ -625,6 +610,31 @@ public class MumlaActivity extends AppCompatActivity implements ListView.OnItemC
                 .setTransition(FragmentTransaction.TRANSIT_FRAGMENT_FADE)
                 .commit();
         requireNonNull(getSupportActionBar()).setTitle(mDrawerAdapter.getItemWithId(fragmentId).title);
+    }
+
+    // VC_WEB_JOIN: handle fresh launches and links while the app is already running.
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleVcJoinIntent(intent);
+    }
+
+    private void handleVcJoinIntent(Intent intent) {
+        if (intent == null || !Intent.ACTION_VIEW.equals(intent.getAction())) return;
+        try {
+            Server server = MumbleURLParser.parseURL(intent.getDataString());
+            String username = server.getUsername();
+            if (username != null && !username.trim().isEmpty()) {
+                connectToServer(server);
+            } else {
+                DialogFragment fragment = ServerEditFragment.createServerEditDialog(
+                        this, server, ServerEditFragment.Action.CONNECT_ACTION, true);
+                fragment.show(getSupportFragmentManager(), "url_edit");
+            }
+        } catch (MalformedURLException e) {
+            Toast.makeText(this, getString(R.string.mumble_url_parse_failed), Toast.LENGTH_LONG).show();
+        }
     }
 
     public void connectToServer(final Server server) {

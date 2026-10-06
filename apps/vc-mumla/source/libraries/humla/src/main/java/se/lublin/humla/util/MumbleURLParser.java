@@ -18,6 +18,8 @@
 package se.lublin.humla.util;
 
 import java.net.MalformedURLException;
+import java.net.URLDecoder;
+import java.io.UnsupportedEncodingException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -39,14 +41,24 @@ public class MumbleURLParser {
      * @return A server with the data specified in the Mumble URL.
      * @throws MalformedURLException if the URL cannot be parsed.
      */
+    private static String decode(String value) throws MalformedURLException {
+        if (value == null) return null;
+        try { return URLDecoder.decode(value.replace("+", "%2B"), "UTF-8"); }
+        catch (IllegalArgumentException | UnsupportedEncodingException e) { throw new MalformedURLException(); }
+    }
+
     public static Server parseURL(String url) throws MalformedURLException {
+        if (url == null) throw new MalformedURLException();
         Matcher matcher = URL_PATTERN.matcher(url);
-        if(matcher.find()) {
-            String username = matcher.group(2);
-            String password = matcher.group(4);
+        if(matcher.matches()) {
+            String username = decode(matcher.group(2));
+            String password = decode(matcher.group(4));
             String host = matcher.group(5);
             String portString = matcher.group(7);
-            int port = portString == null ? Constants.DEFAULT_PORT : Integer.parseInt(portString);
+            int port;
+            try { port = portString == null ? Constants.DEFAULT_PORT : Integer.parseInt(portString); }
+            catch (NumberFormatException e) { throw new MalformedURLException(); }
+            if (port < 1 || port > 65535) throw new MalformedURLException();
             return new Server(-1, null, host, port, username, password);
         } else {
             throw new MalformedURLException();
