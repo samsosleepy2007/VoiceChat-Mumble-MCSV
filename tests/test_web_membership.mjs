@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import {createMembershipReader} from '../web/join/lib/guild.js';
+const id='123456789012345678';const member={user:{id},roles:[],joined_at:'2026-10-06T00:00:00Z',pending:false};
+let now=0,calls=0,status=200,body=member;
+const request=async(url,options)=>{calls++;assert.equal(url,'https://discord.com/api/v10/guilds/1420339720277463112/members/'+id);assert.equal(options.headers.Authorization,'Bot test-only');return {status,ok:status===200,json:async()=>body};};
+const read=createMembershipReader({request,clock:()=>now,botToken:()=> 'test-only'});
+await Promise.all([read('unused',id),read('unused',id)]);assert.equal(calls,1);
+await read('unused',id);assert.equal(calls,1);
+now=20001;await read('unused',id);assert.equal(calls,2);
+status=404;body={code:10007};assert.equal(await read('unused',id,{fresh:true}),null);assert.equal(await read('unused',id),null);
+status=403;body={code:50001};await assert.rejects(read('unused',id),e=>e.reason==='membership_access_denied'&&e.discordCode===50001);
+status=404;body={code:10004};await assert.rejects(read('unused',id),e=>e.reason==='membership_access_denied');
+status=429;body={code:0};await assert.rejects(read('unused',id),e=>e.reason==='membership_rate_limit');
+status=200;body={...member,pending:true};await read('unused',id);const count=calls;await read('unused',id);assert.equal(calls,count+1);
+body={...member,user:{id:'999999999999999999'}};await assert.rejects(read('unused',id),e=>e.reason==='membership_unavailable');
+const oauth=createMembershipReader({botToken:()=>null,request:async(url,options)=>{assert.match(url,/users\/@me\/guilds/);assert.equal(options.headers.Authorization,'Bearer test-only');return {ok:true,status:200,json:async()=>({roles:[],joined_at:'2026-10-06T00:00:00Z',pending:false})};}});
+await oauth('test-only',id);
+console.log('PASS: bot membership lookup, request coalescing, 20s expiry, forced recheck, leave/pending invalidation, missing guild/access/rate errors and optional OAuth user field.');
