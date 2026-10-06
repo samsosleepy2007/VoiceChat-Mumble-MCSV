@@ -14,7 +14,7 @@
       ]
     },
     {
-      "source": "/downloads/(.*)",
+      "source": "/downloads/VC-Mumla-Web-Join.apk",
       "headers": [
         {
           "key": "Content-Type",
@@ -22,23 +22,44 @@
         },
         {
           "key": "Content-Disposition",
-          "value": "attachment; filename=\"VC-Mumla-Web-Join.apk\""
+          "value": "attachment; filename=\"SleepyMumla.apk\""
+        }
+      ]
+    },
+    {
+      "source": "/download",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/vnd.android.package-archive"
+        },
+        {
+          "key": "Content-Disposition",
+          "value": "attachment; filename=\"SleepyMumla.apk\""
         }
       ]
     }
   ],
   "rewrites": [
     {
+      "source": "/download",
+      "destination": "https://raw.githubusercontent.com/samsosleepy2007/VoiceChat-Mumble-MCSV/463292180ee9ce6124c2d53b64c51e9857dd2af7/web/join/downloads/SleepyMumla-v0.6.1.apk"
+    },
+    {
+      "source": "/downloads/VC-Mumla-Web-Join.apk",
+      "destination": "https://raw.githubusercontent.com/samsosleepy2007/VoiceChat-Mumble-MCSV/463292180ee9ce6124c2d53b64c51e9857dd2af7/web/join/downloads/SleepyMumla-v0.6.1.apk"
+    },
+    {
       "source": "/",
       "destination": "/home.html"
     },
     {
       "source": "/join",
-      "destination": "/index.html"
+      "destination": "/join.html"
     },
     {
       "source": "/join/",
-      "destination": "/index.html"
+      "destination": "/join.html"
     },
     {
       "source": "/join/join.js",
