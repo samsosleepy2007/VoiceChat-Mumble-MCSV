@@ -91,6 +91,15 @@ export async function fetchArtifacts(request,release){
  return {wheel:bytes[0],packs};
 }
 const active=new Set();
+export function backupGroups(paths){
+ const groups=new Map();
+ for(const path of paths){
+  const parts=path.split('/');if(parts.some(part=>!validName(part)))fail('unsafe_layout');
+  const name=parts.pop(),root=parts.length?'/'+parts.join('/'):'/';
+  if(!groups.has(root))groups.set(root,new Set());groups.get(root).add(name);
+ }
+ return [...groups].map(([root,files])=>({root,files:[...files]}));
+}
 export async function installOnMCSV(client,body,loadArtifacts){
  const plan=await prepareInstallation(client);if(!plan.compatible)fail('incompatible');if(!plan.installAllowed)fail('permission');
  if(plan.server.id!==body.serverId||plan.world!==body.world)fail('server_changed');
@@ -105,7 +114,10 @@ export async function installOnMCSV(client,body,loadArtifacts){
   for(const path of Object.values(internal.existing))backupFiles.push(path);
   if(internal.config!==null)backupFiles.push('plugins/mumble_host/config.toml');
   if(internal.pluginFiles.some(f=>f.name===WHEEL))backupFiles.push('plugins/'+WHEEL);
-  const backup='SleepyMumla-backup-'+randomUUID()+'.zip';stage='backup';if(backupFiles.length)await client.call('files_compress',{root:'/',files:backupFiles,name:backup});
+  const backup='SleepyMumla-backup-'+randomUUID()+'.zip',backups=[];stage='backup';
+  for(const group of backupGroups(backupFiles)){
+   try{const saved=await client.call('files_compress',{...group,name:backup});const expected=(group.root==='/'?'':group.root)+'/'+backup;if(saved.success!==true||saved.path!==expected)fail('backup_failed');backups.push(saved.path);}catch(error){if(error instanceof MCSVError&&error.code==='rejected')error.code='backup_failed';throw error;}
+  }
   // Recheck immediately before the first write. The panel must keep the server offline.
   const runtime=await client.call('server_overview');if(runtime.info?.id!==plan.server.id||runtime.runtime?.current_state!=='offline')fail('server_running');
   stage='packs';const archiveFiles={};for(const pack of PACKS)for(const [name,data] of Object.entries(source.packs[pack.type]))archiveFiles[(internal.existing[pack.type]||pack.type+'_packs/'+pack.folder)+'/'+name]=data;
@@ -118,6 +130,6 @@ export async function installOnMCSV(client,body,loadArtifacts){
   const uploaded=await client.call('files_read_base64',{path:'/plugins/'+WHEEL});if(typeof uploaded.content_base64!=='string'||createHash('sha256').update(Buffer.from(uploaded.content_base64,'base64')).digest('hex')!==createHash('sha256').update(source.wheel).digest('hex'))fail('verification_failed');
   const confirmed=await read(client,configPath);const edit=configEdit(confirmed,body.voicePort);if(edit.old_string!==edit.new_string)fail('verification_failed');
   stage='start';if(body.start===true)await client.call('power_action',{action:'start'});
-  return {installed:true,started:body.start===true,server:{name:plan.server.name},world:plan.world,voicePort:body.voicePort,backup:backupFiles.length?backup:null,pluginVersion:'0.5.5',addonVersion:'2.15.39'};
+  return {installed:true,started:body.start===true,server:{name:plan.server.name},world:plan.world,voicePort:body.voicePort,backup:backups[0]||null,backups,pluginVersion:'0.5.5',addonVersion:'2.15.39'};
  }catch(error){if(!(error instanceof MCSVError))error=new MCSVError('install_failed');error.stage=stage;error.partial=mutated;throw error;}finally{active.delete(plan.server.id);}
 }
