@@ -18,5 +18,5 @@ export default async function handler(req,res) {
   const lifetime=tokens.accessTokenExpiresInSeconds();if(!Number.isFinite(lifetime)||lifetime<=0)throw Error('expiry');
   const login=await session(req,res);login.user={id:user.id,name:String(user.global_name||user.username).slice(0,80),avatar:typeof user.avatar==='string'&&/^[a-zA-Z0-9_]+$/.test(user.avatar)?`https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png`:null};login.loggedInAt=Date.now();login.guildId=GUILD_ID;login.accessToken=tokens.accessToken();login.tokenExpiresAt=Date.now()+Math.min(lifetime,86400)*1000;await login.save();
   redirect(res,returnTo);
- }catch(error){redirect(res,'/?auth='+(error instanceof GuildError?error.reason:'failed'));}
+ }catch(error){console.warn(JSON.stringify({event:'discord_callback_failed',reason:error instanceof GuildError?error.reason:'oauth_failed',upstreamStatus:error instanceof GuildError?error.status:null,discordCode:error instanceof GuildError?error.discordCode:null}));redirect(res,'/?auth='+(error instanceof GuildError?error.reason:'failed'));}
 }
