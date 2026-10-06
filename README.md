@@ -1,97 +1,121 @@
-# VoiceChat-Mumble-MCSV
+# SleepyMumla — Minecraft Bedrock VoiceChat
 
-**One-file Endstone plugin** สำหรับเปิด Mumble Server และทำ Minecraft Bedrock proximity voice บน MCSV โดยตรง
+SleepyMumla คือระบบแชตเสียงสำหรับ **Minecraft Bedrock บนเซิร์ฟเวอร์ Endstone ของ MCSV** ผู้เล่นเปิดแอปเสียงบน Android ควบคู่กับ Minecraft ส่วนเซิร์ฟเวอร์เป็นผู้กำหนดว่าใครได้ยินใคร ตามตำแหน่ง ระยะไมค์ และมิติในเกม
 
-## Item Mic v2.15.29 — Credit cards / mainhand only
+- [เว็บไซต์ SleepyMumla](https://sleepyvoice-join.vercel.app/) — ดาวน์โหลดแอป สร้างลิงก์ Join และติดตั้งระบบไมค์
+- [Releases](https://github.com/samsosleepy2007/VoiceChat-Mumble-MCSV/releases) — APK, ปลั๊กอิน Endstone, แอดออน และไฟล์ตรวจ SHA-256
+- [ซอร์สของแอปและเว็บไซต์รุ่นปัจจุบัน](https://github.com/samsosleepy2007/VoiceChat-Mumble-MCSV/tree/sleepy-mumla-branding) — สาขา `sleepy-mumla-branding`
 
-แอดออนล่าสุด: [VC_Mumble_ItemMic_v2.15.29_MicFix.mcaddon](release-assets/VC_Mumble_ItemMic_v2.15.29_MicFix.mcaddon)
+## ระบบประกอบด้วยอะไรบ้าง
 
-เพิ่ม `custom:BlackCard` และ `custom:WhiteCard` พร้อมโมเดลและ textures จาก Card ทั้งสองใบ
-ปิดการใส่มือซ้ายของทุกไอเทม รวมถึงไมค์และ SleepyPhone และนำ logic บังคับเปิดไมค์ในมือซ้ายออก
-ไอเทมเดิมในมือซ้ายจะย้ายกลับกระเป๋าเมื่อมีที่ว่าง โดยรักษาข้อมูลโทรศัพท์เดิมไว้
+| ส่วนประกอบ | หน้าที่ | เทคโนโลยีที่ใช้ |
+| --- | --- | --- |
+| Item Mic Addon | ไอเทมไมค์ เมนูปรับระยะ เปิด/ปิดเสียง และ SleepyPhone | Minecraft Behavior Pack / Resource Pack, JavaScript และ Script API |
+| MumbleHost | อ่านสถานะผู้เล่นและควบคุม Mumble Server ภายในเซิร์ฟเวอร์ Minecraft | Python และ Endstone |
+| `mumble-server-vc` | รับส่งเสียงและเลือกผู้ฟังตามระยะ มิติ และคู่สายโทรศัพท์ | Mumble Server 1.6.870 พร้อมแพตช์ C++ ของโครงการ |
+| SleepyMumla Android | รับเสียงจากไมค์ เล่นเสียงของผู้เล่นอื่น และรับลิงก์ Join จากเว็บ | Java, Mumla/Humla, Opus และ Android audio APIs |
+| เว็บไซต์ | ดาวน์โหลดแอป สร้างลิงก์ เข้าสู่ระบบด้วย Discord และติดตั้งผ่าน MCSV API | HTML, CSS, JavaScript, Node.js 22 และ Vercel Functions |
 
-## Item Mic v2.15.4 — Money items
+### ชุดไฟล์ที่เผยแพร่ปัจจุบัน
 
-แอดออน: [VC_Mumble_ItemMic_v2.15.4_Money.mcaddon](release-assets/VC_Mumble_ItemMic_v2.15.4_Money.mcaddon)
+| ส่วนประกอบ | เวอร์ชัน | ไฟล์ |
+| --- | --- | --- |
+| แอป Android | 0.6.3 | `SleepyMumla-v0.6.3.apk` |
+| ปลั๊กอิน Endstone | 0.5.5 | `endstone_mumble_host-0.5.5-py3-none-any.whl` |
+| Item Mic Addon | 2.15.39 | `VC_Mumble_ItemMic_v2.15.39_MicFix.mcaddon` |
 
-ใช้ v2.15.1 ที่อยู่ใน main เป็นฐาน เพิ่มโมเดล, texture และไอเทมเงินจาก Money ทั้ง 6 ค่า โดยใช้ ID ที่มีตัวอักษรนำหน้าค่าเงิน:
-`sleepy:money_1`, `sleepy:money_5`, `sleepy:money_10`, `sleepy:money_100`, `sleepy:money_500`, `sleepy:money_1000`.
-ไอเทมเงินอยู่หมวด Items ใน Creative inventory และถือมือหลักเท่านั้น (ปิด allow_off_hand และนำ wearable offhand ออก).
-ยังไม่มีระบบซื้อขายหรือยอดเงิน ไมค์และ SleepyPhone ใช้ระบบเดิม.
+แต่ละส่วนมีหมายเลขเวอร์ชันแยกกัน เช่น Release ของแอป 0.6.3 ยังใช้ปลั๊กอิน 0.5.5 และแอดออน 2.15.39 ได้ โดยแนบทั้งสามส่วนพร้อมไฟล์ SHA-256 ใน Release เดียวกัน
 
-Source BP/RP อยู่ใน `addon/`; สร้างไฟล์ด้วย `python tools/build_itemmic_addon.py`.
-ตรวจ JSON, ID/texture references และการปิดมือซ้ายแล้ว; ยังต้องทดสอบการแสดงโมเดลใน Minecraft จริง.
+## เสียงและข้อมูลเกมเชื่อมกันอย่างไร
 
-## v0.4.0 experimental topology
-
-```text
-Item Mic Addon
-    |
-    v
-MumbleHost Endstone v0.4.0
-    |
-    +-- Mic ON/OFF
-    +-- Voice Range
-    +-- Player XYZ + Dimension
-    +-- attenuation level 3
-    |
-    v
-127.0.0.1:47855 UDP
-    |
-    v
-mumble-server-vc :18655
+```mermaid
+flowchart TD
+    A["Item Mic Addon ในโลก Minecraft"] -->|"สถานะไมค์และคำขอระยะ"| B["MumbleHost / Endstone"]
+    B -->|"ตำแหน่ง มิติ ระยะ และคู่สายผ่าน localhost UDP"| C["mumble-server-vc"]
+    C <-->|"เชื่อมต่อเซิร์ฟเวอร์เสียงโดยตรง"| D["แอป SleepyMumla ของผู้เล่น"]
+    W["เว็บไซต์ SleepyMumla"] -->|"ลิงก์ Join พร้อมชื่อ Xbox"| D
 ```
 
-ไม่ใช้ Android/mobile bridge, shared secret หรือ plugin VC Mumble Endstone แยกอีกตัว
+1. ผู้เล่นใช้ Item Mic เพื่อควบคุมเสียงและระยะที่ต้องการ แอดออนส่งสถานะผ่าน tags และระบบ request/ACK ใน Minecraft
+2. ปลั๊กอิน Endstone อ่านชื่อผู้เล่น ตำแหน่ง มิติ และสถานะไมค์ แล้วส่งข้อมูลให้ Mumble Server ที่ทำงานอยู่ในเซิร์ฟเวอร์เดียวกัน
+3. ผู้เล่นเชื่อมต่อแอปด้วย **ชื่อ Xbox ที่ตรงกับชื่อใน Minecraft รวมถึงตัวพิมพ์ใหญ่–เล็ก** เพื่อให้ระบบจับคู่เสียงกับตัวละครได้ถูกต้อง
+4. Mumble Server ใช้ข้อมูลเกมกำหนดการส่งเสียง: ไมค์ต้องเปิด ผู้ฟังต้องอยู่ในมิติเดียวกันและในระยะที่อนุญาต พร้อมระบบลดเสียงตามระยะ
+5. SleepyPhone เพิ่มการโทรระหว่างคู่สาย โดยเซิร์ฟเวอร์จัดการเส้นทางเสียงของการโทรร่วมกับระบบเสียงในโลกเกม
 
-## Features
+**เว็บไซต์ไม่ได้เป็นตัวส่งต่อเสียง** หลังเปิดแอปแล้ว เสียงเชื่อมตรงระหว่างแอปกับ Mumble Server ไม่ต้องใช้มือถือเป็น bridge ส่งตำแหน่ง และไม่ต้องเปิด Mumble Server แยกบนเครื่องของผู้เล่น
 
-- เปิด Mumble Server 1.6.870 บน MCSV อัตโนมัติ
-- ใช้ custom `mumble-server-vc` ที่มี proximity routing patch
-- Mic ON/OFF จาก Item Mic tags
-- Voice Range จาก Item Mic request/ACK contract
-- แยกเสียงตาม Minecraft dimension
-- ตัดเสียงเมื่อเกิน Voice Range
-- smooth distance attenuation ค่าเริ่มต้น level 3
-- ใช้ชื่อ Minecraft เป็น Mumble username
-- local state feed เป็น localhost-only
-- `/vcb` แสดงสถานะ Mumble/Range/Mic และมีปุ่ม restart host สำหรับ Operator
+## ต้องเตรียมอะไรบ้าง
 
-## Welcome text
+### เจ้าของเซิร์ฟเวอร์
 
-```text
-Hosted by MCSV
-Plugin Mumble connate by SamSoSleepy
-Discord : https://discord.gg/FnmWw7nWyq
-```
+- เซิร์ฟเวอร์ **MCSV / Minecraft Bedrock / Endstone** ที่พร้อมใช้งานและมีโลกแล้ว
+- พอร์ตเพิ่มเติมสำหรับเสียง เปิดได้ทั้ง **TCP และ UDP** และไม่ซ้ำกับพอร์ต Minecraft หรือบริการอื่น
+- MCSV API Key ของเซิร์ฟเวอร์นั้น พร้อมสิทธิ์อ่านข้อมูลเซิร์ฟเวอร์/โดเมน อ่านและจัดการไฟล์ รวมถึงจัดการสถานะเซิร์ฟเวอร์เพื่อ Restart
+- Minecraft และ Endstone ที่รองรับแอดออน: manifest ปัจจุบันระบุ `min_engine_version` เป็น `1.26.40`, `@minecraft/server` เป็น `2.9.0` และ `@minecraft/server-ui` เป็น `2.1.0`
+- เซิร์ฟเวอร์ต้องดาวน์โหลด runtime และไลบรารีเพิ่มเติมได้ในการเริ่มระบบเสียงครั้งแรก
 
-## Default ports
+ตัวติดตั้งบนเว็บรองรับเฉพาะ MCSV และ Endstone สำหรับ Bedrock ไม่รองรับ Java, Java ที่ใช้ Geyser หรือ Bedrock Dedicated Server ธรรมดา ปลั๊กอินและ runtime นี้ออกแบบสำหรับสภาพแวดล้อม Linux x86_64 ของ MCSV
 
-- Mumble: `18655` TCP/UDP
-- Local proximity state: `127.0.0.1:47855` UDP
+### ผู้เล่น
 
-## Item Mic contract
+- Minecraft Bedrock ที่เข้าเซิร์ฟเวอร์ได้
+- แอป SleepyMumla บน Android และสิทธิ์ใช้ไมโครโฟน
+- ชื่อ Xbox ของตนเอง และที่อยู่พร้อมพอร์ตเสียงของเซิร์ฟเวอร์
 
-Addon ใช้ tags เดิม:
+แอป 0.6.3 เลือกลำโพงหลักเป็นค่าเริ่มต้นเมื่อใช้โหมดเสียงปกติและไม่ได้ต่อหูฟัง พร้อมระบบตัดเสียงสะท้อน หากเปิดโหมด Handset ในการตั้งค่าแอป จะใช้การทำงานสำหรับลำโพงแนบหูแทน
 
-- `vcmumble.mic.on`
-- `vcmumble.mic.off`
-- `vcmumble.vr.request.*`
-- `vcmumble.vr.sync.*`
-- `vcmumble.vr.value.*`
-- `vcmumble.vr.max.*`
-- `vcmumble.vr.ack.*`
+## ติดตั้งผ่านเว็บไซต์
 
-ดังนั้น Item Mic ไม่ต้องมี Android bridge หรือ secret ใด ๆ
+1. เปิด [เว็บไซต์](https://sleepyvoice-join.vercel.app/) แล้วกด **ติดตั้งระบบไมค์**
+2. เข้าสู่ระบบด้วย Discord บัญชีต้องเป็นสมาชิก Discord ของโครงการ หากยังไม่อยู่ ระบบใช้สิทธิ์ OAuth2 ที่ผู้ใช้อนุญาตเพื่อเพิ่มสมาชิก
+3. ใน MCSV เปิดหน้าเซิร์ฟเวอร์ → **ระบบ → API / MCP** → สร้าง Key แบบกำหนดเอง แล้วเปิดสิทธิ์ตามรายการข้างต้น
+4. วาง Key ในหน้าติดตั้งและกด **ตรวจสอบเซิร์ฟเวอร์** ระบบตรวจชนิดเซิร์ฟเวอร์ โลก พอร์ต สิทธิ์ และไฟล์เดิม
+5. เมื่อผ่านการตรวจ ระบบเปิดหน้าถาม **พอร์ตเสียง** ทันที เลือกพอร์ตแล้วกด **ใช้พอร์ตนี้** เพื่อเริ่มติดตั้ง
+6. ระบบดาวน์โหลดไฟล์ที่ตรวจ SHA-256 แล้ว สำรองไฟล์เดิมที่เกี่ยวข้องแยกตามโฟลเดอร์ ติดตั้งปลั๊กอินและ BP/RP และเพิ่มแพ็กในรายการของโลก โดยรักษารายการแพ็กอื่นไว้
+7. **ติดตั้งไฟล์ขณะเซิร์ฟเวอร์เปิดอยู่ได้** จากนั้นระบบ Restart อัตโนมัติ หรือ Start หากเซิร์ฟเวอร์ปิดอยู่ ผู้เล่นจะหลุดชั่วคราวระหว่าง Restart
+8. เมื่อเซิร์ฟเวอร์เริ่มรอบใหม่และปลั๊กอินรายงานว่าระบบเสียงพร้อม เว็บจะพาไปหน้า **Join** พร้อมโดเมนและพอร์ตเสียงที่ติดตั้งจริง
 
-## Config
+API Key ใช้เฉพาะคำขอที่จำเป็น ไม่บันทึกลงฐานข้อมูลหรือใส่ในลิงก์ Join อย่าส่ง Key ในแชต หากสิทธิ์ไม่ครบให้แก้ที่ MCSV ไม่ใช่เปลี่ยนพอร์ตเพื่อข้ามการตรวจ
+
+ตัวติดตั้งจะหยุดเมื่อพบแพ็ก UUID ซ้ำ เวอร์ชันเดิมที่ขัดแย้ง หรือโครงสร้างไฟล์ที่ยืนยันไม่ได้ เพื่อให้เจ้าของเซิร์ฟเวอร์ตรวจจัดการก่อน
+
+## ติดตั้งด้วยตนเอง
+
+1. ดาวน์โหลด `.whl` และ `.mcaddon` จาก Release ชุดเดียวกัน
+2. วาง `.whl` ใน `/plugins/` ของ Endstone
+3. แตก `.mcaddon` จะได้ BP และ RP แบบ `.mcpack` จากนั้นแตกแพ็กลงโฟลเดอร์ `behavior_packs` และ `resource_packs`
+4. เปิดใช้แพ็กในโลกปัจจุบันผ่าน `world_behavior_packs.json` และ `world_resource_packs.json` โดยใช้ UUID/เวอร์ชันจาก manifest และเก็บรายการแพ็กอื่นไว้
+5. ตั้งพอร์ตเสียงใน `/plugins/mumble_host/config.toml` ให้เป็นพอร์ตที่ MCSV จัดสรรและเปิดทั้ง TCP/UDP
+6. Restart Minecraft server แล้วรอระบบเสียงเริ่มทำงาน การเปิดครั้งแรกอาจใช้เวลาหลายนาที
+7. ใช้ `/vcb` ในเกมเพื่อตรวจสถานะ แล้วให้ผู้เล่นเชื่อมต่อผ่านหน้า Join
+
+## วิธีเข้าร่วมของผู้เล่น
+
+1. ดาวน์โหลดและติดตั้ง SleepyMumla จากเว็บไซต์
+2. เปิดลิงก์ Join ของเซิร์ฟเวอร์ ตรวจว่าเป็น **พอร์ตเสียง** ไม่ใช่พอร์ต Minecraft
+3. กรอกชื่อ Xbox ให้ถูกต้อง แล้วกด **เปิดด้วยแอป** หากยังไม่กรอก เว็บจะแจ้งให้กรอกก่อน
+4. อนุญาตใช้ไมโครโฟนใน Android แล้วกลับเข้า Minecraft เพื่อใช้ไอเทมไมค์และเมนูปรับระยะ
+
+ตัวอย่างลิงก์เปิดแอป: `mumble://Sam4014XD@sv7.mcsv.me:18655/` ชื่อที่มีช่องว่างหรืออักขระพิเศษต้องเข้ารหัส URL ซึ่งหน้าเว็บจัดการให้
+
+APK ที่เผยแพร่ปัจจุบันเป็น debug build ลายเซ็นระหว่างรุ่นอาจต่างกัน หาก Android ปฏิเสธการติดตั้งทับ ต้องถอนรุ่นเดิมก่อน โดยข้อมูลแอปเดิมจะถูกล้าง ควรเก็บข้อมูลเซิร์ฟเวอร์และ export ใบรับรองผู้ใช้ที่จำเป็นไว้ก่อน
+
+## พอร์ตและไฟล์ตั้งค่า
+
+| รายการ | ค่าเริ่มต้น | ใช้ทำอะไร |
+| --- | --- | --- |
+| Mumble | `18655` TCP/UDP | แอปเชื่อมต่อเสียงจากภายนอก ต้องเลือกพอร์ตที่ถูกจัดสรรจริง |
+| Local state | `127.0.0.1:47855` UDP | ปลั๊กอินส่งสถานะเกมให้ Mumble ภายในเครื่อง ไม่ต้องเปิดให้ผู้เล่นเชื่อมต่อ |
+| Minecraft | ตามค่าเซิร์ฟเวอร์ | เข้าเกม แยกจากพอร์ตเสียง |
+
+ค่าตั้งต้นของแพ็กเกจปัจจุบันใน `config.toml`:
 
 ```toml
 [tracking]
-interval_ticks = 2
+interval_ticks = 4
 position_epsilon = 0.05
 rotation_epsilon = 1.0
-heartbeat_seconds = 15
+heartbeat_seconds = 2
 
 [mumble]
 port = 18655
@@ -104,21 +128,48 @@ max_queue = 4096
 
 [voice]
 default_range = 30
-max_range = 150
+max_range = 60
 default_attenuation_level = 3
 ```
 
-## Current experimental branch
+ระยะเริ่มต้นคือ 30 บล็อก และค่าจำกัดผู้เล่นทั่วไปตาม config คือ 60 บล็อก พอร์ต `18655` เป็นเพียงค่าเริ่มต้น ไม่ใช่พอร์ตที่ใช้ได้กับทุกเซิร์ฟเวอร์ ตัวติดตั้งจะให้เลือกจากพอร์ตเพิ่มเติมของเซิร์ฟเวอร์นั้น
 
-`experiment/unified-itemmic-proximity-v0.4.0`
+## ตรวจสอบปัญหา
 
-ยังไม่ merge เข้า `main` จนกว่าจะทดสอบกับผู้เล่นจริงครบ Mic ON/OFF, Range, distance attenuation และ DDUI.
+| อาการ | จุดที่ควรตรวจ |
+| --- | --- |
+| เข้าเกมได้แต่แอปต่อเสียงไม่ได้ | ตรวจโดเมน พอร์ตเสียง TCP/UDP และสถานะ Mumble ผ่าน `/vcb` |
+| แอปต่อได้แต่ผู้เล่นไม่ได้ยินกัน | ตรวจชื่อ Xbox สถานะไมค์ ระยะที่เลือก และมิติของผู้เล่น |
+| ได้ยินผ่านลำโพงแนบหู | ใช้แอป 0.6.3 ขึ้นไป ปิดโหมด Handset และตรวจหูฟังที่เชื่อมต่อ |
+| เปิดจากเว็บแล้วแอปล้มที่ `setPassword()` | ใช้แอป 0.6.2 ขึ้นไป ซึ่งแก้กรณีลิงก์ไม่มีรหัสผ่านแล้ว |
+| Key ตรวจได้แต่ติดตั้งไม่ได้ | เพิ่มสิทธิ์อ่าน/จัดการไฟล์และจัดการสถานะเซิร์ฟเวอร์ใน MCSV |
+| ติดตั้งแล้วรอระบบเสียงนาน | ตรวจ Console, `/plugins/mumble_host/host-status.txt` และ `/home/container/mumble-runtime/data/mumble-server.log` |
+| ต้องการดูภาระปลั๊กอิน | ผู้ดูแลใช้ `/vcb perf` เพื่อตรวจสถิติของปลั๊กอิน |
 
-### v2.15.4 fixes
+ข้อมูล Mumble เก็บใน SQLite ภายใน runtime ส่วนข้อมูลแอดออน เช่น โทรศัพท์ รายชื่อ และบัญชีในเกม ใช้ dynamic properties ของโลก/ไอเทม ไม่ต้องตั้ง PostgreSQL หรือ MySQL เพิ่มเพื่อใช้งาน voice chat นี้ เว็บไซต์ปัจจุบันใช้ Discord OAuth2 และ session cookie; ยังไม่มีระบบเติมเครดิตบนเว็บไซต์
 
-Money items use format 1.26.0 with armor/enchantable/durability/repairable removed.
-Mic flag reassertion checks getItem before accessing a container slot and handles unloaded slots.
+## โครงสร้างซอร์สและการพัฒนา
 
-## VC Mumla player app
+| โฟลเดอร์ | เนื้อหา |
+| --- | --- |
+| `src/endstone_mumble_host/` | ปลั๊กอิน Python, ตัวติดตามผู้เล่น, local state และตัวเปิด Mumble runtime |
+| `mumble-patch/` | แพตช์ C++ สำหรับ proximity voice และ SleepyPhone |
+| `addon/BP/` และ `addon/RP/` | สคริปต์เกม ไอเทม UI โมเดล texture และเสียง |
+| `apps/vc-mumla/source/` | ซอร์สแอป Android ที่ปรับจาก Mumla/Humla |
+| `web/join/` | หน้าเว็บ Discord OAuth2 และ MCSV installer |
+| `tests/` | การทดสอบเสียง โทรศัพท์ แอดออน และเว็บ |
+| `.github/workflows/` | Build, ตรวจสอบ และเผยแพร่ Release |
 
-Source code and published Android APK: [apps/vc-mumla](apps/vc-mumla/README.md).
+**การพัฒนาแอปและเว็บรุ่นล่าสุดอยู่บน `sleepy-mumla-branding`** ให้ checkout สาขานี้ก่อน build ส่วนไฟล์ provenance ในแอปบันทึกที่มาของ upstream และรุ่นตั้งต้น ไม่ใช่ checksum ของ APK ทุกรุ่น ให้ตรวจ APK ปัจจุบันด้วยไฟล์ SHA-256 ใน Release นั้น
+
+สร้างปลั๊กอินและแอดออนจากซอร์ส:
+
+```sh
+python -m pip install build
+python -m build --wheel
+python tools/build_itemmic_addon.py
+```
+
+ปลั๊กอินต้องใช้ Python 3.11 ขึ้นไปและ Endstone 0.11.0 ขึ้นไป การ build แอปใช้ Java 21, Android SDK 36 และ NDK 25.1.8937393 ดูรายละเอียดใน [README ของแอป](apps/vc-mumla/README.md)
+
+ควรรักษาใบอนุญาตและข้อมูลที่มาของ Mumla, Humla, Mumble และไลบรารีที่ใช้ไว้พร้อมซอร์ส
