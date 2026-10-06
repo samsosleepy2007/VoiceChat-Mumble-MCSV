@@ -1,5 +1,6 @@
+import {randomUUID} from 'node:crypto';
 import { headers, configured, session } from '../../lib/auth.js';
-import { readMember, GUILD_ID } from '../../lib/guild.js';
+import { readMember, GUILD_ID, GuildError } from '../../lib/guild.js';
 export default async function handler(req,res) {
  headers(res);if(req.method!=='GET')return res.status(405).end();
  if(!configured())return res.status(200).json({user:null,configured:false});
@@ -10,5 +11,5 @@ export default async function handler(req,res) {
   const member=await readMember(s.accessToken,s.user.id);
   if(!member||member.pending===true){s.destroy();return res.status(200).json({user:null,configured:true,reason:member?'screening':'membership_required'});}
   return res.status(200).json({user:{id:s.user.id,name:s.user.name,avatar:s.user.avatar},configured:true});
- }catch{return res.status(503).json({user:null,configured:true,reason:'membership_unavailable'});}
+ }catch(error){const reference=randomUUID();const reason=error instanceof GuildError?error.reason:'membership_unavailable';console.warn(JSON.stringify({event:'discord_session_failed',reference,reason,upstreamStatus:error instanceof GuildError?error.status:null,discordCode:error instanceof GuildError?error.discordCode:null}));return res.status(503).json({user:null,configured:true,reason,reference});}
 }
