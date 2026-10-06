@@ -9,7 +9,6 @@ export default async function handler(req,res) {
   const state=q.get('state');const valid=typeof tx.state==='string' && typeof state==='string' && Buffer.byteLength(state)===Buffer.byteLength(tx.state) && timingSafeEqual(Buffer.from(state),Buffer.from(tx.state)) && typeof tx.verifier==='string' && Number.isFinite(tx.created) && Date.now()-tx.created>=0 && Date.now()-tx.created<600000;
   const returnTo=safeReturn(tx.returnTo);const verifier=tx.verifier;tx.destroy();
   if(!valid || !q.get('code') || q.has('error'))return redirect(res,'/?auth=cancelled');
-  const previous=await session(req,res);previous.destroy();
   const tokens=await provider().validateAuthorizationCode(q.get('code'),verifier);
   const result=await fetch('https://discord.com/api/v10/users/@me',{headers:{Authorization:'Bearer '+tokens.accessToken()},signal:AbortSignal.timeout(10000)});
   if(!result.ok)throw Error('profile');const user=await result.json();
