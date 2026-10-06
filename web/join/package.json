@@ -1,1 +1,1 @@
-{"private":true,"type":"module","engines":{"node":"22.x"},"dependencies":{"arctic":"3.7.0","iron-session":"8.0.4"}}
+{"private":true,"type":"module","engines":{"node":"22.x"},"dependencies":{"arctic":"3.7.0","fflate":"0.8.2","iron-session":"8.0.4"}}
