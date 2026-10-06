@@ -7,7 +7,10 @@ const valid=await checkMCSV(key,reply('minecraft-bedrock','endstone'));
 assert.equal(valid.compatible,true);assert.equal(valid.server.private_field,undefined);
 for(const [game,type] of [['minecraft-bedrock','bedrock'],['minecraft-java','paper'],['minecraft-java','endstone']])assert.equal((await checkMCSV(key,reply(game,type))).compatible,false);
 const before=calls;await assert.rejects(checkMCSV('https://other-host.example/key',reply('minecraft-bedrock','endstone')),e=>e.code==='invalid_key');assert.equal(calls,before);
-for(const [status,code] of [[401,'invalid_key'],[403,'permission'],[409,'installing'],[429,'rate_limit'],[500,'unavailable']])await assert.rejects(checkMCSV(key,async()=>({ok:false,status})),e=>e.code===code);
+for(const [status,code] of [[401,'invalid_key'],[403,'permission'],[409,'installing'],[429,'rate_limit'],[500,'upstream'],[400,'rejected'],[404,'endpoint']])await assert.rejects(checkMCSV(key,async()=>({ok:false,status})),e=>e.code===code);
 await assert.rejects(checkMCSV(key,async()=>({ok:true,status:200,json:async()=>({ok:true,result:{name:'endstone'}})})),e=>e.code==='unverified');
 await assert.rejects(checkMCSV(key,async()=>{throw Error(key)}),e=>e.code==='unavailable'&&!e.message.includes(key));
 console.log('PASS: strict Bedrock/Endstone gate, fixed MCSV destination, no private fields, invalid keys, API permissions/errors and no credential echo.');
+
+await assert.rejects(checkMCSV(key,async()=>{const e=Error();e.name='TimeoutError';throw e}),e=>e.code==='timeout');
+await assert.rejects(checkMCSV(key,async()=>({ok:true,status:200,json:async()=>{throw Error(key)}})),e=>e.code==='invalid_response'&&!e.message.includes(key));
