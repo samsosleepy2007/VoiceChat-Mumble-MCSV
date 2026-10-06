@@ -14,3 +14,6 @@ Only verified, non-pending members receive an application session. A missing bot
 Membership is checked whenever /api/auth/session is requested. Protected future APIs must perform equivalent server-side checks; static downloads and Mumble server access are not protected by website login.
 The OAuth access token is sealed inside an encrypted HttpOnly/Secure cookie solely for membership rechecks, never returned by the session endpoint or written to logs. Sessions expire at the earlier of token expiry and 24 hours. No refresh token is stored. Existing cookies from before membership enforcement require reauthentication.
 Membership Screening is respected: pending members must accept server rules in Discord and sign in again.
+
+
+Membership rechecks use the bot when configured. Verified full membership is cached for up to 20 seconds per function instance, concurrent rechecks are coalesced, and callback/join always forces a fresh check. No pending, absent, or failed result grants membership. OAuth fallback accepts the optional user field according to Discord member schema.
