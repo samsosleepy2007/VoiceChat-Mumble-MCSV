@@ -26,6 +26,13 @@ jobs:
       - name: Build APK
         working-directory: apps/vc-mumla/source
         run: |
+          python3 - <<'PYBUILD'
+          from pathlib import Path
+          p = Path('app/build.gradle')
+          p.write_text(p.read_text().replace('applicationId "se.lublin.mumla.beta"', 'applicationId "se.lublin.mumla.webjoin"'))
+          p = Path('app/src/beta/res/values/strings_notranslate.xml')
+          p.write_text(p.read_text().replace('>VC Mumla<', '>VC Mumla Web Join<'))
+          PYBUILD
           chmod +x gradlew
           ./gradlew :app:assembleBetaDebug --no-daemon --stacktrace
           mkdir -p "$GITHUB_WORKSPACE/out"
