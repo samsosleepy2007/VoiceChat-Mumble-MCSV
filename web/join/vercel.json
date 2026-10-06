@@ -42,6 +42,10 @@
   ],
   "rewrites": [
     {
+      "source": "/lib/:path*",
+      "destination": "/api/not-found"
+    },
+    {
       "source": "/download",
       "destination": "https://raw.githubusercontent.com/samsosleepy2007/VoiceChat-Mumble-MCSV/463292180ee9ce6124c2d53b64c51e9857dd2af7/web/join/downloads/SleepyMumla-v0.6.1.apk"
     },
@@ -73,5 +77,10 @@
       "source": "/install/",
       "destination": "/install.html"
     }
-  ]
+  ],
+  "functions": {
+    "api/mcsv/install.js": {
+      "maxDuration": 300
+    }
+  }
 }
