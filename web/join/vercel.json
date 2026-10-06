@@ -64,6 +64,14 @@
     {
       "source": "/join/join.js",
       "destination": "/join.js"
+    },
+    {
+      "source": "/install",
+      "destination": "/install.html"
+    },
+    {
+      "source": "/install/",
+      "destination": "/install.html"
     }
   ]
 }
