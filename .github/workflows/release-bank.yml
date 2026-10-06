@@ -1,0 +1,30 @@
+name: Release SleepyBank v0.5.10
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release-v0.5.10]'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify addon
+        run: |
+          node --input-type=module --check < addon/BP/scripts/main.js
+          for test in tests/*.mjs; do node "$test"; done
+          python3 tools/build_itemmic_addon.py
+      - name: Prepare release bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir out
+          gh release download v0.5.9 --repo "$GITHUB_REPOSITORY" --pattern '*.whl' --pattern '*.apk' --dir out
+          cp release-assets/VC_Mumble_ItemMic_v2.15.39_MicFix.mcaddon out/
+          (cd out && sha256sum *.whl *.apk *.mcaddon > SHA256SUMS.txt)
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create v0.5.10 out/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title 'v0.5.10 — SleepyBank & SleepyATM' --notes-file release-notes/v0.5.10.md --latest

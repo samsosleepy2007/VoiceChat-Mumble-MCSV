@@ -127,14 +127,6 @@ function getMainId(player) {
   }
 }
 
-function getOffId(player) {
-  try {
-    return itemId(equippable(player)?.getEquipment(EquipmentSlot.Offhand));
-  } catch {
-    return "";
-  }
-}
-
 function migrateDynamicProperties(player) {
   try {
     if (player.getDynamicProperty(PROP_MODE) === undefined) {
@@ -202,19 +194,14 @@ function scanMic(player) {
       if (isMicId(id)) result.push({ where: "inventory", index: i, id });
     }
   }
-  try {
-    const offId = getOffId(player);
-    if (isMicId(offId)) result.push({ where: "offhand", index: -1, id: offId });
-  } catch {}
   return result;
 }
 
 function enforceSingleMic(player) {
   const inv = inventory(player);
-  const offMic = isMicId(getOffId(player));
   let keepIndex = -1;
 
-  if (!offMic && inv) {
+  if (inv) {
     let selected = -1;
     try {
       selected = Number(player.selectedSlotIndex);
@@ -243,7 +230,7 @@ function enforceSingleMic(player) {
   if (inv) {
     for (let i = 0; i < inv.size; i++) {
       if (!isMicId(itemId(inv.getItem(i)))) continue;
-      if (!offMic && i === keepIndex) continue;
+      if (i === keepIndex) continue;
       inv.setItem(i, undefined);
       removed++;
     }
@@ -277,6 +264,17 @@ function ensureMic(player) {
 }
 
 function migrateLegacyItems(player) {
+  // Recover previously equipped items without enabling any offhand behavior.
+  try {
+    const eq = equippable(player);
+    const item = eq?.getEquipment(EquipmentSlot.Offhand);
+    const inv = inventory(player);
+    if (inv && item && (isMicId(item.typeId) || isPhoneId(item.typeId))) {
+      const leftover = inv.addItem(item);
+      if (!leftover) eq.setEquipment(EquipmentSlot.Offhand, undefined);
+    }
+  } catch {}
+
   let legacyMode = null;
   const inv = inventory(player);
 
@@ -293,16 +291,6 @@ function migrateLegacyItems(player) {
       console.warn(`[VCMumbleItem/BP] MIGRATE player=${player.name} slot=${i} ${id}->${MIC_OFF}`);
     }
   }
-
-  try {
-    const eq = equippable(player);
-    const off = eq?.getEquipment(EquipmentSlot.Offhand);
-    const id = itemId(off);
-    if (isLegacyId(id)) {
-      legacyMode = id === LEGACY_TOGGLE ? MODE_TOGGLE : MODE_HOLD;
-      eq?.setEquipment(EquipmentSlot.Offhand, makeMic(false));
-    }
-  } catch {}
 
   if (legacyMode !== null) {
     setMode(player, legacyMode);
@@ -326,17 +314,6 @@ function replaceMicStatus(player, on) {
     }
   }
 
-  try {
-    const eq = equippable(player);
-    const off = eq?.getEquipment(EquipmentSlot.Offhand);
-    const id = itemId(off);
-    if (isMicId(id) && id !== target) {
-      eq?.setEquipment(EquipmentSlot.Offhand, makeMic(on));
-      changed = true;
-    }
-  } catch (e) {
-    console.warn(`[VCMumbleItem/BP] offhand status replace failed player=${player.name}: ${e}`);
-  }
 
   return changed;
 }
@@ -355,13 +332,6 @@ function reassertMicFlags(player) {
     }
   }
 
-  try {
-    const off = equippable(player)?.getEquipmentSlot(EquipmentSlot.Offhand);
-    if (off && isMicId(off.typeId)) {
-      off.lockMode = ItemLockMode.inventory;
-      off.keepOnDeath = true;
-    }
-  } catch {}
 }
 
 function publishMicState(player, on) {
@@ -400,15 +370,14 @@ function stateFor(player) {
 
   const mode = getMode(player);
   const mainMic = isMicId(getMainId(player));
-  const offMic = isMicId(getOffId(player));
   let latch = getLatch(player);
 
   if (mode === MODE_TOGGLE && player.getDynamicProperty(PROP_LATCH) === undefined) {
     const anyOn = scanMic(player).some((entry) => entry.id === MIC_ON);
-    if (anyOn && !offMic) latch = true;
+    if (anyOn) latch = true;
   }
 
-  const effective = offMic || (mode === MODE_HOLD ? mainMic : latch);
+  const effective = mode === MODE_HOLD ? mainMic : latch;
   state = {
     mode,
     micKnown: hasAnyMic(player),
@@ -427,8 +396,7 @@ function evaluate(player) {
   // Keep inventory maintenance out of the per-tick path.
   const state = stateFor(player);
   const mainMic = isMicId(getMainId(player));
-  const offMic = isMicId(getOffId(player));
-  const hasMic = state.micKnown || mainMic || offMic;
+  const hasMic = state.micKnown || mainMic;
   const mode = getMode(player);
   if (player.hasTag("vcmumble.call.mic")) {
     state.effective = true;
@@ -445,7 +413,7 @@ function evaluate(player) {
 
   if (mode !== state.mode) {
     if (mode === MODE_TOGGLE) {
-      state.toggleLatched = !!(mainMic && !offMic);
+      state.toggleLatched = !!mainMic;
       setLatch(player, state.toggleLatched);
     } else {
       state.toggleLatched = false;
@@ -454,7 +422,7 @@ function evaluate(player) {
     state.mode = mode;
   }
 
-  if (hasMic && mode === MODE_TOGGLE && mainMic && !state.lastMainMic && !offMic) {
+  if (hasMic && mode === MODE_TOGGLE && mainMic && !state.lastMainMic) {
     state.toggleLatched = !state.toggleLatched;
     setLatch(player, state.toggleLatched);
     console.warn(
@@ -468,7 +436,7 @@ function evaluate(player) {
   }
 
   const effective =
-    hasMic && (offMic || (mode === MODE_HOLD ? mainMic : state.toggleLatched));
+    hasMic && (mode === MODE_HOLD ? mainMic : state.toggleLatched);
 
   if (effective !== state.effective) {
     state.effective = effective;
@@ -479,8 +447,7 @@ function evaluate(player) {
 
   const wantedId = effective ? MIC_ON : MIC_OFF;
   if (state.appliedEffective !== effective ||
-      (mainMic && getMainId(player) !== wantedId) ||
-      (offMic && getOffId(player) !== wantedId)) {
+      (mainMic && getMainId(player) !== wantedId)) {
     replaceMicStatus(player, effective);
     state.appliedEffective = effective;
   }
@@ -512,11 +479,6 @@ function currentPhoneSlot(player) {
     if (main && isPhoneId(main.typeId)) return main;
   } catch {}
 
-  try {
-    const eq = equippable(player);
-    const off = eq?.getEquipmentSlot(EquipmentSlot.Offhand);
-    if (off && isPhoneId(off.typeId)) return off;
-  } catch {}
 
   const inv = inventory(player);
   if (!inv) return undefined;
@@ -899,7 +861,6 @@ function playerHasPhoneId(player, phoneId) {
   try {
     const eq = equippable(player);
     if (slotHasPhoneId(eq?.getEquipmentSlot(EquipmentSlot.Mainhand), phoneId)) return true;
-    if (slotHasPhoneId(eq?.getEquipmentSlot(EquipmentSlot.Offhand), phoneId)) return true;
   } catch {}
 
   const inv = inventory(player);
@@ -971,7 +932,7 @@ function leavePhoneVoice(player) {
 function phoneCallFor(player) { return phoneCalls.get(playerPhoneCalls.get(player.id)); }
 function callPlayer(id) { return world.getAllPlayers().find(p => p.id === id); }
 function heldPhoneData(player) {
-  if (getMainId(player) !== PHONE && getOffId(player) !== PHONE) return undefined;
+  if (getMainId(player) !== PHONE) return undefined;
   return phoneItemData(currentPhoneSlot(player));
 }
 function clearPhoneCallTags(player) {
@@ -1104,6 +1065,460 @@ const openPhonePlayers = new Set();
 
 // Only register controls visible on this page with the native DDUI form.
 // Shared observables preserve input while each navigation creates a new form.
+const BANK_ACCOUNT_PREFIX = "sleepybank:account:";
+const BANK_OWNER_PREFIX = "sleepybank:owner:";
+const BANK_CARD_ACCOUNT = "sleepybank:account";
+const BANK_CARD_IDS = { black: "custom:blackcard", white: "custom:whitecard" };
+
+function readBankAccount(phoneId) {
+  const number = world.getDynamicProperty("sleepybank:phone:" + phoneId);
+  if (typeof number !== "string") return undefined;
+  try {
+    const account = JSON.parse(world.getDynamicProperty(BANK_ACCOUNT_PREFIX + number));
+    return account.phoneId === phoneId && account.number === number ? account : undefined;
+  } catch { return undefined; }
+}
+function writeBankAccount(account) {
+  world.setDynamicProperty(BANK_ACCOUNT_PREFIX + account.number, JSON.stringify(account));
+  world.setDynamicProperty("sleepybank:phone:" + account.phoneId, account.number);
+}
+function migrateBankAccount(player, phoneId) {
+  if (readBankAccount(phoneId) || !canEditPhoneIc(player, phoneId)) return;
+  const number = world.getDynamicProperty(BANK_OWNER_PREFIX + player.name.toLowerCase());
+  if (typeof number !== "string") return;
+  try {
+    const account = JSON.parse(world.getDynamicProperty(BANK_ACCOUNT_PREFIX + number));
+    if (account.phoneId || account.owner !== player.name.toLowerCase()) return;
+    account.phoneId = phoneId;
+    writeBankAccount(account);
+    world.setDynamicProperty(BANK_OWNER_PREFIX + account.owner, undefined);
+  } catch {}
+}
+function randomBankNumber(previous = "") {
+  const start = Math.floor(Math.random() * 900);
+  let fallback;
+  for (let i = 0; i < 900; i++) {
+    const number = String(100 + (start + i) % 900);
+    if (world.getDynamicProperty(BANK_ACCOUNT_PREFIX + number) !== undefined) continue;
+    if (number !== previous) return number;
+    fallback = number;
+  }
+  return fallback;
+}
+function openBankAccount(phoneId, number) {
+  const existing = readBankAccount(phoneId);
+  if (existing) return existing;
+  if (!/^[1-9]\d{2}$/.test(number) || world.getDynamicProperty(BANK_ACCOUNT_PREFIX + number) !== undefined) return undefined;
+  const account = { number, phoneId, balance: 0, cardType: "" };
+  writeBankAccount(account);
+  return account;
+}
+function bankCardName(account) {
+  return `บัตร - ${account.number}`;
+}
+function issueBankCard(player, phoneId, type) {
+  const account = readBankAccount(phoneId);
+  if (!account) return "กรุณาเปิดบัญชีธนาคารก่อน";
+  if (account.cardType) return "บัญชีนี้ได้รับบัตรแล้ว";
+  if (!BANK_CARD_IDS[type]) return "ไม่พบประเภทบัตร";
+  const inv = inventory(player);
+  if (!inv || inv.emptySlotsCount === 0) return "กระเป๋าเต็ม กรุณาเว้นช่องว่างแล้วเลือกบัตรอีกครั้ง";
+  const card = new ItemStack(BANK_CARD_IDS[type], 1);
+  card.setDynamicProperty(BANK_CARD_ACCOUNT, account.number);
+  card.nameTag = bankCardName(account);
+  if (inv.addItem(card)) return "กระเป๋าเต็ม กรุณาเว้นช่องว่างแล้วเลือกบัตรอีกครั้ง";
+  account.cardType = type;
+  writeBankAccount(account);
+  return "";
+}
+function syncBankCards(player) {
+  const inv = inventory(player);
+  if (!inv) return;
+  for (let i = 0; i < inv.size; i++) {
+    const card = inv.getItem(i);
+    if (!card || !Object.values(BANK_CARD_IDS).includes(card.typeId)) continue;
+    const number = card.getDynamicProperty(BANK_CARD_ACCOUNT);
+    if (typeof number !== "string") continue;
+    try {
+      const account = JSON.parse(world.getDynamicProperty(BANK_ACCOUNT_PREFIX + number));
+      if (account.number !== number) continue;
+      const name = bankCardName(account);
+      if (card.nameTag !== name) { card.nameTag = name; inv.setItem(i, card); }
+    } catch {}
+  }
+}
+
+const openAtmPlayers = new Set();
+function atmAccountFromCard(player) {
+  const card = equippable(player)?.getEquipment(EquipmentSlot.Mainhand);
+  if (!card || !Object.values(BANK_CARD_IDS).includes(card.typeId)) {
+    return { error: "กรุณาถือบัตรเครดิตของคุณ" };
+  }
+  const number = card.getDynamicProperty(BANK_CARD_ACCOUNT);
+  if (typeof number !== "string") return { error: "บัตรนี้ยังไม่ได้ลงทะเบียนบัญชีธนาคาร" };
+  try {
+    const account = JSON.parse(world.getDynamicProperty(BANK_ACCOUNT_PREFIX + number));
+    if (account.number !== number || !account.phoneId || !account.cardType) throw new Error("invalid account");
+    return { account };
+  } catch { return { error: "ไม่พบบัญชีธนาคารของบัตรนี้" }; }
+}
+const CASH_VALUES = [1, 5, 10, 100, 500, 1000];
+function cashValue(item) {
+  if (!item) return 0;
+  for (const value of CASH_VALUES) if (item.typeId === `sleepy:money_${value}`) return value;
+  return 0;
+}
+function cashTotal(player) {
+  const inv = inventory(player);
+  let total = 0;
+  if (inv) for (let i = 0; i < inv.size; i++) { const item = inv.getItem(i); total += cashValue(item) * (item?.amount ?? 0); }
+  return total;
+}
+function depositCash(player, number, amount) {
+  if (!Number.isSafeInteger(amount) || amount <= 0) return { error: "กรุณาเลือกจำนวนเงินเต็มที่มากกว่า 0" };
+  const access = atmAccountFromCard(player);
+  if (access.error || access.account.number !== number) return { error: "กรุณาถือบัตรบัญชีเดิมที่ใช้เปิด ATM" };
+  const account = access.account;
+  if (!Number.isSafeInteger(account.balance) || account.balance < 0 || !Number.isSafeInteger(account.balance + amount)
+      || !Number.isSafeInteger((account.income ?? 0) + amount)) return { error: "ยอดเงินบัญชีไม่ถูกต้องหรือเกินขีดจำกัด" };
+  const inv = inventory(player);
+  if (!inv || cashTotal(player) < amount) return { error: "เงินสดไม่เพียงพอ กรุณาเลือกจำนวนใหม่" };
+  const original = Array.from({ length: inv.size }, (_, i) => inv.getItem(i));
+  const planned = original.map(item => item?.clone());
+  let remaining = amount;
+  for (const value of CASH_VALUES) {
+    for (let i = 0; i < planned.length && remaining > 0; i++) {
+      const item = planned[i];
+      if (cashValue(item) !== value) continue;
+      const take = Math.min(item.amount, Math.ceil(remaining / value));
+      remaining -= take * value;
+      if (take === item.amount) planned[i] = undefined;
+      else item.amount -= take;
+    }
+    if (remaining <= 0) break;
+  }
+  let change = -remaining;
+  for (const value of [...CASH_VALUES].reverse()) {
+    let count = Math.floor(change / value);
+    change %= value;
+    if (!count) continue;
+    const sample = new ItemStack(`sleepy:money_${value}`, 1);
+    for (const item of planned) {
+      if (!item || !item.isStackableWith(sample)) continue;
+      const add = Math.min(64 - item.amount, count);
+      item.amount += add; count -= add;
+      if (!count) break;
+    }
+    while (count > 0) {
+      const i = planned.findIndex(item => !item);
+      if (i < 0) return { error: "กระเป๋าไม่มีที่รับเงินทอน กรุณาเว้นช่องว่างแล้วลองใหม่" };
+      const add = Math.min(64, count);
+      planned[i] = new ItemStack(sample.typeId, add); count -= add;
+    }
+  }
+  const updated = { ...account, balance: account.balance + amount, income: (account.income ?? 0) + amount };
+  // Plan all change before touching inventory. Keep mutations synchronous and roll back failures.
+  try {
+    for (let i = 0; i < inv.size; i++) inv.setItem(i, planned[i]);
+    writeBankAccount(updated);
+  } catch (e) {
+    for (let i = 0; i < inv.size; i++) inv.setItem(i, original[i]);
+    writeBankAccount(account);
+    console.warn(`[SleepyATM] DEPOSIT_FAILED: ${e}`);
+    return { error: "ฝากเงินไม่สำเร็จ เงินสดถูกคืนแล้ว กรุณาลองใหม่" };
+  }
+  return { amount, account: updated };
+}
+function withdrawCash(player, number, amount) {
+  if (!Number.isSafeInteger(amount) || amount <= 0) return { error: "กรุณาเลือกจำนวนเงินเต็มที่มากกว่า 0" };
+  const access = atmAccountFromCard(player);
+  if (access.error || access.account.number !== number) return { error: "กรุณาถือบัตรบัญชีเดิมที่ใช้เปิด ATM" };
+  const account = access.account;
+  if (!Number.isSafeInteger(account.balance) || account.balance < 0
+      || !Number.isSafeInteger(account.expenses ?? 0) || (account.expenses ?? 0) < 0
+      || !Number.isSafeInteger((account.expenses ?? 0) + amount)) return { error: "ยอดเงินบัญชีไม่ถูกต้องหรือเกินขีดจำกัด" };
+  if (amount > account.balance) return { error: "เงินในบัญชีไม่เพียงพอ กรุณาเลือกจำนวนใหม่" };
+  const inv = inventory(player);
+  if (!inv) return { error: "ไม่สามารถเข้าถึงกระเป๋าได้ กรุณาลองใหม่" };
+  const original = Array.from({ length: inv.size }, (_, i) => inv.getItem(i));
+  const planned = original.map(item => item?.clone());
+  let remaining = amount;
+  for (const value of [...CASH_VALUES].reverse()) {
+    let count = Math.floor(remaining / value);
+    remaining %= value;
+    if (!count) continue;
+    const sample = new ItemStack(`sleepy:money_${value}`, 1);
+    for (const item of planned) {
+      if (!item || !item.isStackableWith(sample)) continue;
+      const add = Math.min(64 - item.amount, count);
+      if (add > 0) item.amount += add;
+      count -= add;
+      if (!count) break;
+    }
+    while (count > 0) {
+      const i = planned.findIndex(item => !item);
+      if (i < 0) return { error: "กระเป๋าไม่มีที่รับเงินสด กรุณาเว้นช่องว่างแล้วลองใหม่" };
+      const add = Math.min(64, count);
+      planned[i] = new ItemStack(sample.typeId, add); count -= add;
+    }
+  }
+  const updated = { ...account, balance: account.balance - amount, expenses: (account.expenses ?? 0) + amount };
+  // Allocate every cash stack before applying either inventory or account changes.
+  try {
+    for (let i = 0; i < inv.size; i++) inv.setItem(i, planned[i]);
+    writeBankAccount(updated);
+  } catch (e) {
+    for (let i = 0; i < inv.size; i++) inv.setItem(i, original[i]);
+    writeBankAccount(account);
+    console.warn(`[SleepyATM] WITHDRAW_FAILED: ${e}`);
+    return { error: "ถอนเงินไม่สำเร็จ ยอดบัญชีถูกคืนแล้ว กรุณาลองใหม่" };
+  }
+  return { amount, account: updated };
+}
+const bankTransferPlayers = new Set();
+let bankTransferSequence = 0;
+function bankByNumber(number) {
+  if (!/^\d{3}$/.test(number)) return undefined;
+  try { const a = JSON.parse(world.getDynamicProperty(BANK_ACCOUNT_PREFIX + number) || "null"); return a?.number === number && a.phoneId && a.cardType ? a : undefined; } catch { return undefined; }
+}
+function bankHistory(number) { return readPhoneHistoryStore("sleepybank:history:" + number); }
+function transferBankMoney(player, sourceNumber, targetNumber, amount, authorize) {
+  if (!Number.isSafeInteger(amount) || amount <= 0) return { error: "กรุณาเลือกจำนวนเงินเต็มที่มากกว่า 0" };
+  if (!authorize()) return { error: "กรุณาถือโทรศัพท์หรือบัตรบัญชีเดิม" };
+  const source = bankByNumber(sourceNumber), target = bankByNumber(targetNumber);
+  if (!source || !target) return { error: "ไม่พบบัญชีธนาคาร" };
+  if (sourceNumber === targetNumber) return { error: "ไม่สามารถโอนเข้าบัญชีตัวเองได้" };
+  if (!Number.isSafeInteger(source.balance) || source.balance < amount) return { error: "เงินในบัญชีไม่เพียงพอ" };
+  if (![target.balance, source.expenses ?? 0, target.income ?? 0].every(v => Number.isSafeInteger(v) && v >= 0)
+      || ![target.balance + amount, (source.expenses ?? 0) + amount, (target.income ?? 0) + amount].every(Number.isSafeInteger)) return { error: "ยอดเงินเกินขีดจำกัดหรือไม่ถูกต้อง" };
+  const senderName = readPhoneProfile(source.phoneId)?.icName;
+  const recipientName = readPhoneProfile(target.phoneId)?.icName;
+  if (!senderName || !recipientName) return { error: "ไม่พบข้อมูลชื่อ IC ของบัญชี" };
+  const row = { id: `${Date.now()}-${++bankTransferSequence}`, timestamp: Date.now(), source: sourceNumber, target: targetNumber, senderName, recipientName, amount };
+  const prefixes = ["sleepybank:history:" + sourceNumber, "sleepybank:history:" + targetNumber, "sleepybank:pending:" + targetNumber];
+  const exact = [BANK_ACCOUNT_PREFIX + sourceNumber, BANK_ACCOUNT_PREFIX + targetNumber, "sleepybank:phone:" + source.phoneId, "sleepybank:phone:" + target.phoneId];
+  const relevant = key => exact.includes(key) || prefixes.some(p => key === p || key.startsWith(p + ":"));
+  const before = new Map(world.getDynamicPropertyIds().filter(relevant).map(k => [k, world.getDynamicProperty(k)]));
+  try {
+    writeBankAccount({ ...source, balance: source.balance - amount, expenses: (source.expenses ?? 0) + amount });
+    writeBankAccount({ ...target, balance: target.balance + amount, income: (target.income ?? 0) + amount });
+    writePhoneHistoryStore(prefixes[0], bankHistory(sourceNumber).concat(row));
+    writePhoneHistoryStore(prefixes[1], bankHistory(targetNumber).concat(row));
+    writePhoneHistoryStore(prefixes[2], readPhoneHistoryStore(prefixes[2]).concat(row));
+  } catch (e) {
+    for (const k of world.getDynamicPropertyIds().filter(relevant)) if (!before.has(k)) world.setDynamicProperty(k, undefined);
+    for (const [k, value] of before) world.setDynamicProperty(k, value);
+    console.warn(`[SleepyBank] TRANSFER_FAILED: ${e}`);
+    return { error: "โอนไม่สำเร็จ ยอดทั้งสองบัญชีถูกคืนแล้ว" };
+  }
+  player.sendMessage(`§b[ SleepyBank ]§r §fโอนเงินจำนวน §6${amount}§f ไปยังบัญชี §b${targetNumber}§a สำเร็จ§r`);
+  try { player.playSound("sleepybank.pay_success", { volume: 1, pitch: 1 }); } catch {}
+  return { row };
+}
+function deliverBankNotifications() {
+  for (const player of world.getPlayers()) {
+    const inv = inventory(player);
+    const seen = new Set();
+    if (!inv) continue;
+    for (let i = 0; i < inv.size; i++) {
+      const item = inv.getItem(i);
+      if (!item || !isPhoneId(item.typeId)) continue;
+      const id = String(item.getDynamicProperty(PHONE_PROP_ID) ?? "");
+      const account = readBankAccount(id);
+      if (!account || seen.has(account.number)) continue;
+      seen.add(account.number);
+      const key = "sleepybank:pending:" + account.number;
+      const pending = readPhoneHistoryStore(key);
+      if (!pending.length) continue;
+      // Clear delivered batch so moving the phone cannot replay old notifications.
+      writePhoneHistoryStore(key, []);
+      for (const row of pending) {
+        player.sendMessage(`§b[ SleepyBank ]§r §fคุณได้รับเงินจำนวน §a${row.amount}§f จาก §b${row.senderName}§r`);
+        try { player.playSound("sleepybank.receive", { volume: 1, pitch: 1 }); } catch {}
+      }
+    }
+  }
+}
+async function showBankHistory(player, number, authorize) {
+  let page = 0;
+  while (authorize()) {
+    const rows = bankHistory(number).slice().reverse();
+    page = Math.min(page, Math.max(0, Math.ceil(rows.length / 8) - 1));
+    const batch = rows.slice(page * 8, page * 8 + 8);
+    const form = new ActionFormData().title("SleepyBank — ประวัติการโอน").body(`บัญชี ${number}\nหน้า ${page + 1}\n${rows.length ? "เลือกรายการเพื่อดูรายละเอียด" : "ยังไม่มีประวัติการโอน"}`);
+    for (const row of batch) form.button(`${row.source === number ? "โอนออก" : "รับโอน"} ${row.amount}\n${row.source === number ? row.recipientName : row.senderName} — ${formatPhoneMessageTime(row.timestamp)}`);
+    const older = rows.length > (page + 1) * 8, newer = page > 0;
+    if (older) form.button("เก่ากว่า");
+    if (newer) form.button("ใหม่กว่า");
+    form.button("ย้อนกลับ");
+    const response = await form.show(player);
+    if (response.canceled || !authorize()) return;
+    let index = response.selection;
+    if (index < batch.length) {
+      const row = batch[index];
+      await new ActionFormData().title("รายละเอียดการโอน").body(`§7วันเวลา: ${formatPhoneMessageTime(row.timestamp)}§r\n\nจาก: §b${row.senderName} — ${row.source}§r\n\nไปยัง: §b${row.recipientName} — ${row.target}§r\n\nจำนวนเงิน: §6${row.amount}§r\n\n§7เลขรายการ: ${row.id}§r`).button("ย้อนกลับ").show(player);
+    } else {
+      index -= batch.length;
+      if (older && index-- === 0) { page++; continue; }
+      if (newer && index-- === 0) { page--; continue; }
+      return;
+    }
+  }
+}
+async function showBankTransfer(player, number, authorize) {
+  if (bankTransferPlayers.has(player.id)) return;
+  bankTransferPlayers.add(player.id);
+  const destination = new ObservableString("", { clientWritable: true });
+  const manual = new ObservableBoolean(false, { clientWritable: true });
+  const input = new ObservableString("0", { clientWritable: true });
+  const selected = new ObservableNumber(0, { clientWritable: true });
+  let confirming = false, done = false;
+  try {
+    while (!done && authorize()) {
+      const form = new CustomForm(player, "SleepyBank — โอนเงิน");
+      const status = new ObservableString("");
+      let next = false, job;
+      if (confirming) {
+        const targetNumber = destination.getData().trim();
+        const target = bankByNumber(targetNumber);
+        const amount = manual.getData() ? Number(input.getData()) : selected.getData();
+        let submitting = false;
+        const busy = new ObservableBoolean(false);
+        const visible = new ObservableBoolean(true);
+        form.header("ยืนยันการโอนเงิน").label(`\nชื่อผู้รับ: §b${readPhoneProfile(target?.phoneId)?.icName ?? "ไม่พบข้อมูล"}§r\n\nบัญชีปลายทาง: §b${targetNumber}§r\n\nจำนวนเงิน: §6${amount}§r\n`)
+          .button("ยืนยันโอน", () => {
+            if (submitting || done) return;
+            submitting = true; busy.setData(true); visible.setData(false);
+            try {
+              const result = transferBankMoney(player, number, targetNumber, amount, authorize);
+              if (result.error) { status.setData("§c" + result.error + "§r"); return; }
+              done = true; form.close();
+            } finally { if (!done) { submitting = false; busy.setData(false); visible.setData(true); } }
+          }, { disabled: busy, visible })
+          .button("ย้อนกลับแก้ไข", () => { confirming = false; next = true; form.close(); }, { disabled: busy }).label(status).closeButton();
+      } else {
+        const info = new ObservableString("");
+        const max = new ObservableNumber(1), sliderVisible = new ObservableBoolean(true), textVisible = new ObservableBoolean(false);
+        const refresh = () => {
+          const balance = bankByNumber(number)?.balance ?? 0;
+          info.setData(`\nเลขบัญชี: §b${number}§r\n\nเงินในบัญชี: §6${balance}§r\n`); max.setData(Math.max(1, balance));
+          sliderVisible.setData(!manual.getData()); textVisible.setData(!!manual.getData());
+          selected.setData(Math.max(0, Math.min(balance, Math.floor(Number(selected.getData()) || 0))));
+          if (/^\d+$/.test(input.getData().trim()) && Number(input.getData()) > balance) input.setData(String(balance));
+        };
+        refresh();
+        form.header("โอนเงินไปยังบัญชีอื่น").label(info).textField("เลขบัญชีปลายทาง 3 หลัก", destination)
+          .toggle("กรอกจำนวนเงินเอง", manual).slider("จำนวนเงินที่จะโอน", selected, 0, max, { step: 1, visible: sliderVisible })
+          .textField("จำนวนเงินที่จะโอน", input, { visible: textVisible })
+          .button("ถัดไป", () => {
+            refresh();
+            const target = destination.getData().trim(), raw = manual.getData() ? input.getData().trim() : String(selected.getData());
+            if (!authorize()) { status.setData("§c" + "กรุณาถือโทรศัพท์หรือบัตรบัญชีเดิม" + "§r"); return; }
+            if (!bankByNumber(target)) { status.setData("§c" + "ไม่พบบัญชีปลายทาง" + "§r"); return; }
+            if (target === number) { status.setData("§c" + "ไม่สามารถโอนเข้าบัญชีตัวเองได้" + "§r"); return; }
+            if (!/^\d+$/.test(raw) || !Number.isSafeInteger(Number(raw)) || Number(raw) <= 0) { status.setData("§c" + "กรุณาเลือกจำนวนเงินเต็มที่มากกว่า 0" + "§r"); return; }
+            confirming = true; next = true; form.close();
+          }).label(status).closeButton();
+        job = system.runInterval(refresh, 4);
+      }
+      try { await form.show(); } finally { if (job !== undefined) system.clearRun(job); }
+      if (!next) break;
+      await new Promise(resolve => system.runTimeout(resolve, 1));
+    }
+  } catch (e) { player.sendMessage("§b[ SleepyBank ]§r §c ไม่สามารถเปิดหน้าโอนเงินได้ กรุณาลองใหม่"); console.warn(`[SleepyBank] UI_FAILED: ${e}`); }
+  finally { bankTransferPlayers.delete(player.id); }
+}
+async function openAtm(player) {
+  if (!player || openAtmPlayers.has(player.id)) return;
+  const access = atmAccountFromCard(player);
+  if (access.error) { player.sendMessage(`§b[ SleepyATM ]§r §f§e${access.error}§r`); return; }
+  const number = access.account.number;
+  openAtmPlayers.add(player.id);
+  let page = "home";
+  try {
+    while (page) {
+      let nextPage = "";
+      const status = new ObservableString("");
+      const info = new ObservableString("");
+      const form = new CustomForm(player, page === "home" ? "SleepyATM" : page === "withdraw" ? "SleepyATM — ถอนเงิน" : "SleepyATM — ฝากเงิน");
+      const changePage = name => { nextPage = name; form.close(); };
+      const currentAccount = () => {
+        const current = atmAccountFromCard(player);
+        if (current.error || current.account.number !== number) throw new Error("กรุณาถือบัตรบัญชีเดิมที่ใช้เปิด ATM");
+        return current.account;
+      };
+      let job;
+      if (page === "home") {
+        const account = currentAccount();
+        form.header("สถานะบัญชีธนาคาร")
+          .label(`\nเลขบัญชี: §b${account.number}§r\n\nจำนวนเงินที่มีทั้งหมด: §6${account.balance}§r\n\nรายรับ: §a${account.income ?? 0}§r\n\nรายจ่าย: §6${account.expenses ?? 0}§r\n`)
+          .button("ฝากเงิน", () => changePage("deposit"))
+          .button("ถอนเงิน", () => changePage("withdraw"))
+          .button("โอนเงิน", () => changePage("transfer"))
+          .button("ประวัติการโอน", () => changePage("history"))
+          .label(status).closeButton();
+      } else if (page === "transfer" || page === "history") {
+        const authorize = () => { try { return currentAccount().number === number; } catch { return false; } };
+        if (page === "transfer") await showBankTransfer(player, number, authorize);
+        else await showBankHistory(player, number, authorize);
+        page = "home";
+        continue;
+      } else {
+        const withdrawing = page === "withdraw";
+        const verb = withdrawing ? "ถอน" : "ฝาก";
+        const available = () => withdrawing ? currentAccount().balance : cashTotal(player);
+        const manual = new ObservableBoolean(false, { clientWritable: true });
+        const sliderVisible = new ObservableBoolean(true);
+        const manualVisible = new ObservableBoolean(false);
+        const disabled = new ObservableBoolean(available() === 0);
+        const maximum = new ObservableNumber(Math.max(1, available()));
+        const selected = new ObservableNumber(0, { clientWritable: true });
+        const input = new ObservableString("0", { clientWritable: true });
+        const refresh = () => {
+          const cash = cashTotal(player);
+          const account = currentAccount();
+          info.setData(`\nเลขบัญชี: §b${account.number}§r\n\nเงินสดทั้งหมด: §6${cash}§r\n\nเงินในบัญชี: §6${account.balance}§r\n`);
+          const limit = withdrawing ? account.balance : cash;
+          maximum.setData(Math.max(1, limit)); disabled.setData(limit === 0);
+          sliderVisible.setData(!manual.getData()); manualVisible.setData(!!manual.getData());
+          const slider = Math.max(0, Math.min(limit, Math.floor(Number(selected.getData()) || 0)));
+          if (selected.getData() !== slider) selected.setData(slider);
+          const raw = String(input.getData()).trim();
+          if (/^\d+$/.test(raw) && Number(raw) > limit) input.setData(String(limit));
+        };
+        const confirm = () => {
+          try {
+            refresh();
+            const raw = manual.getData() ? String(input.getData()).trim() : String(selected.getData());
+            if (!/^\d+$/.test(raw)) { status.setData("§c" + "กรุณากรอกจำนวนเงินเต็มที่มากกว่า 0" + "§r"); return; }
+            const amount = Math.min(available(), Number(raw));
+            const result = withdrawing ? withdrawCash(player, number, amount) : depositCash(player, number, amount);
+            if (result.error) { status.setData("§c" + result.error + "§r"); return; }
+            selected.setData(0); input.setData("0");
+            refresh(); status.setData(`§a${verb}เงินสำเร็จ §6${result.amount}§r`);
+            player.sendMessage(`§b[ SleepyATM ]§r §f§a${verb}เงินสำเร็จ §6${result.amount}§r`);
+            form.close();
+          } catch (e) { status.setData("§c" + String(e.message ?? e) + "§r"); }
+        };
+        refresh();
+        form.header(withdrawing ? "ถอนเงินจากบัญชี" : "ฝากเงินเข้าบัญชี").label(info)
+          .toggle("กรอกจำนวนเงินเอง", manual)
+          .slider(`จำนวนเงินที่จะ${verb}`, selected, 0, maximum, { step: 1, visible: sliderVisible, disabled })
+          .textField(`จำนวนเงินที่จะ${verb}`, input, { visible: manualVisible, disabled })
+          .button(`ยืนยันจำนวนเงินที่จะ${verb}`, confirm, { disabled })
+          .label(status).button("ย้อนกลับ", () => changePage("home")).closeButton();
+        job = system.runInterval(() => { try { refresh(); } catch (e) { status.setData("§c" + String(e.message ?? e) + "§r"); } }, 4);
+      }
+      try { await form.show(); } finally { if (job !== undefined) system.clearRun(job); }
+      page = nextPage;
+      if (page) await new Promise(resolve => system.runTimeout(resolve, 1));
+    }
+  } catch (e) {
+    console.warn(`[SleepyATM] OPEN_FAILED: ${e}`);
+    player.sendMessage("§b[ SleepyATM ]§r §c ไม่สามารถเปิดตู้ ATM ได้ กรุณาลองอีกครั้ง");
+  } finally { openAtmPlayers.delete(player.id); }
+}
+
 function phonePageForm(player, title) {
   const native = new CustomForm(player, title);
   let controls = 0;
@@ -1184,7 +1599,7 @@ async function showPhone(player, requestedAt = Date.now()) {
   try {
     if (initial.profile && !await unlockPhone(player, initial.profile.id)) return;
     const pageNames = [
-      "setupName", "setupNumber", "home", "bank", "sendMethod", "sendNumber", "contacts",
+      "setupName", "setupNumber", "home", "bank", "bankWarning", "bankRegister", "bankCard", "sendMethod", "sendNumber", "contacts",
       "addContact", "contactDetail", "deleteContact", "compose", "inbox", "messageDetail",
       "callMethod", "callNumber", "callContacts", "callStatus", "contactsApp", "editContact", "callConfirm", "deleteChat", "phoneSettings", "createPin",
     ];
@@ -1195,6 +1610,7 @@ async function showPhone(player, requestedAt = Date.now()) {
     let form;
     let requestedPage = false;
     let requestedHistory;
+    let requestedBank;
     let currentPhonePage = "";
     let syncDynamicButtonVisibility = () => {};
     const showPage = (name) => {
@@ -1214,6 +1630,10 @@ async function showPhone(player, requestedAt = Date.now()) {
     const identityText = new ObservableString("");
     const homeStatus = new ObservableString("");
     const bankStatus = new ObservableString("");
+    const bankInfo = new ObservableString("");
+    const bankNumber = new ObservableString("", { clientWritable: true });
+    const bankNumberDisabled = new ObservableBoolean(true);
+    let pendingBankNumber = "";
 
     const directNumberInput = new ObservableString("", { clientWritable: true });
     const directNumberStatus = new ObservableString("");
@@ -1518,6 +1938,51 @@ async function showPhone(player, requestedAt = Date.now()) {
       }
       numberInput.setData(number);
       finishRegistration(number);
+    };
+
+    const refreshBank = () => {
+      const account = readBankAccount(activeProfile.id);
+      if (!account) { showPage("bankRegister"); return; }
+      bankInfo.setData(`\nเลขบัญชี: §b${account.number}§r\n\nจำนวนเงิน: §6${account.balance}§r\n`);
+      syncBankCards(player);
+      showPage(account.cardType ? "bank" : "bankCard");
+    };
+    const randomizeBank = () => {
+      pendingBankNumber = randomBankNumber(pendingBankNumber) ?? "";
+      bankNumber.setData(pendingBankNumber);
+      bankStatus.setData(pendingBankNumber ? "" : "เลขบัญชีเต็มแล้ว ไม่สามารถเปิดบัญชีเพิ่มได้");
+    };
+    const enterBankRegistration = () => { randomizeBank(); showPage("bankRegister"); };
+    const openBank = () => {
+      bankStatus.setData("");
+      migrateBankAccount(player, activeProfile.id);
+      if (readBankAccount(activeProfile.id)) { refreshBank(); return; }
+      if (!readPhoneLock(activeProfile.id)) showPage("bankWarning");
+      else enterBankRegistration();
+    };
+    const createBank = () => {
+      // Use the private candidate, never the client-writable display field.
+      if (!openBankAccount(activeProfile.id, pendingBankNumber)) {
+        bankStatus.setData("§cเลขบัญชีนี้ไม่ว่างแล้ว กรุณากดสุ่มเลขบัญชีใหม่§r"); return;
+      }
+      bankStatus.setData("");
+      refreshBank();
+    };
+    const chooseBankCard = (type) => {
+      try {
+        const error = issueBankCard(player, activeProfile.id, type);
+        if (!error) {
+          requestedPage = false;
+          form.close();
+          phoneChat(player, "คุณเปิดบัญชีแล้ว รักษาโทรศัพท์และบัตรของคุณให้ดี");
+          return;
+        }
+        bankStatus.setData("§c" + error + "§r");
+      } catch (e) {
+        bankStatus.setData("§cไม่สามารถรับบัตรได้ กรุณาลองอีกครั้งหรือติดต่อผู้ดูแล§r");
+        console.warn(`[SleepyBank] CARD_ISSUE_FAILED type=${type}: ${e}`);
+      }
+      refreshBank();
     };
 
     const icEditDisabled = new ObservableBoolean(true);
@@ -2030,10 +2495,7 @@ async function showPhone(player, requestedAt = Date.now()) {
       .button(inboxHomeButtonLabel, openInbox, { visible: pages.home })
       .button("โทร", openCallMethod, { visible: pages.home })
       .button("รายชื่อ", openContacts, { visible: pages.home })
-      .button("ธนาคาร", () => {
-        bankStatus.setData("");
-        showPage("bank");
-      }, { visible: pages.home })
+      .button("ธนาคาร", openBank, { visible: pages.home })
       .button("ตั้งค่า", () => { settingsStatus.setData(""); refreshPhoneSettings(); }, { visible: pages.home })
       .spacer({ visible: pages.home })
       .header("Favorites", { visible: pages.home })
@@ -2079,10 +2541,31 @@ async function showPhone(player, requestedAt = Date.now()) {
       .spacer({ visible: pages.home })
       .label(homeStatus, { visible: pages.home })
 
+      .header("คำเตือนรหัสผ่านโทรศัพท์", { visible: pages.bankWarning })
+      .label("\n§eยังไม่ได้ตั้งรหัสผ่านโทรศัพท์\n\nถ้าโทรศัพท์นี้ไปอยู่กับคนอื่น เขาสามารถเข้าธนาคารของเราได้§r\n", { visible: pages.bankWarning })
+      .button("ยืนยันไปต่อ", enterBankRegistration, { visible: pages.bankWarning })
+      .button("ไปหน้าตั้งค่า", () => { settingsStatus.setData(""); refreshPhoneSettings(); }, { visible: pages.bankWarning })
+      .button("ย้อนกลับ", openHome, { visible: pages.bankWarning })
+
+      .header("ลงทะเบียนบัญชีธนาคาร", { visible: pages.bankRegister })
+      .textField("เลขบัญชี 3 หลัก", bankNumber, { visible: pages.bankRegister, disabled: bankNumberDisabled })
+      .button("สุ่มเลขบัญชี", randomizeBank, { visible: pages.bankRegister })
+      .button("ยืนยันเลขบัญชี", createBank, { visible: pages.bankRegister })
+      .label(bankStatus, { visible: pages.bankRegister })
+      .button("ย้อนกลับ", openHome, { visible: pages.bankRegister })
+
+      .header("เลือกบัตรธนาคาร", { visible: pages.bankCard })
+      .label(bankInfo, { visible: pages.bankCard })
+      .button("BlackCard", () => chooseBankCard("black"), { visible: pages.bankCard })
+      .button("WhiteCard", () => chooseBankCard("white"), { visible: pages.bankCard })
+      .label(bankStatus, { visible: pages.bankCard })
+      .button("ย้อนกลับ", openHome, { visible: pages.bankCard })
+
       .header("ธนาคาร", { visible: pages.bank })
-      .label("\nเลขบัญชี: ยังไม่ได้เปิดบัญชี\n\nจำนวนเงิน: 0\n", { visible: pages.bank })
-      .button("โอนเงิน", () => bankStatus.setData("\nระบบโอนเงินเตรียมไว้สำหรับพัฒนาต่อ\n"), { visible: pages.bank })
-      .button("ทัชสแกน", () => bankStatus.setData("\nระบบทัชสแกนเตรียมไว้สำหรับพัฒนาต่อ\n"), { visible: pages.bank })
+      .label(bankInfo, { visible: pages.bank })
+      .button("โอนเงิน", () => { requestedBank = "transfer"; form.close(); }, { visible: pages.bank })
+      .button("ประวัติการโอน", () => { requestedBank = "history"; form.close(); }, { visible: pages.bank })
+      .button("ทัชแพด", () => bankStatus.setData("§7\nระบบทัชแพดเตรียมไว้สำหรับพัฒนาต่อ\n§r"), { visible: pages.bank })
       .label(bankStatus, { visible: pages.bank })
       .button("ย้อนกลับ", openHome, { visible: pages.bank })
 
@@ -2236,6 +2719,18 @@ async function showPhone(player, requestedAt = Date.now()) {
 
       await form.show();
       form = undefined;
+      if (requestedBank) {
+        const mode = requestedBank; requestedBank = undefined;
+        const profile = initial.profile;
+        const account = profile && readBankAccount(profile.id);
+        const authorize = () => resolvePhoneProfile(player).profile?.id === profile?.id && readBankAccount(profile?.id)?.number === account?.number;
+        await new Promise(resolve => system.run(resolve));
+        if (account) {
+          if (mode === "transfer") await showBankTransfer(player, account.number, authorize);
+          else await showBankHistory(player, account.number, authorize);
+        }
+        if (authorize()) { openBank(); requestedPage = true; }
+      }
       if (requestedHistory) {
         const returnPage = requestedHistory;
         requestedHistory = undefined;
@@ -2553,8 +3048,7 @@ function applyMicModeFromUi(
 
   if (newMode === MODE_TOGGLE) {
     const mainMic = isMicId(getMainId(player));
-    const offMic = isMicId(getOffId(player));
-    setLatch(player, !!(mainMic && !offMic));
+    setLatch(player, !!mainMic);
   } else {
     setLatch(player, false);
   }
@@ -2656,11 +3150,6 @@ async function showSettings(player) {
       `เสียงตามระยะ: §d${attenuationLabel(initialAttenuation)} (ระดับ ${initialAttenuation})§r\n`
     );
     const attenuationConfirmText = new ObservableString("สถานะ Distance Volume: ใช้ค่าปัจจุบัน\n");
-    const offhandText = new ObservableString(
-      isMicId(getOffId(player))
-        ? "มือซ้าย: §aMic อยู่มือซ้าย — บังคับ ON§r\n"
-        : "มือซ้าย: §7ไม่มี Mic§r\n"
-    );
     const serverLimitText = new ObservableString(
       isOperator(player)
         ? "สิทธิ์: §dOperator — Endstone อนุญาตสูงสุด 1000 บล็อก§r\n"
@@ -3007,6 +3496,11 @@ function handleMicUse(player) {
 }
 
 system.beforeEvents.startup.subscribe((ev) => {
+  ev.blockComponentRegistry.registerCustomComponent("sleepy:atm_interact", {
+    onPlayerInteract(arg) {
+      if (arg.player) system.run(() => openAtm(arg.player));
+    },
+  });
   ev.itemComponentRegistry.registerCustomComponent("vcmumble:open_settings", {
     onUse(arg) {
       handleMicUse(arg.source);
@@ -3057,6 +3551,7 @@ world.afterEvents.playerLeave.subscribe((ev) => {
   openSettingsPlayers.delete(ev.playerId);
   openSettingsForms.delete(ev.playerId);
   openPhonePlayers.delete(ev.playerId);
+  openAtmPlayers.delete(ev.playerId);
 });
 
 // One-tick evaluation keeps Hold-to-Talk responsive and immediately mirrors
@@ -3077,6 +3572,7 @@ system.runInterval(() => {
       migrateLegacyItems(player);
       ensureMic(player);
       reassertMicFlags(player);
+      syncBankCards(player);
       syncVoiceRangeFromServer(player);
       const state = stateFor(player);
       state.micKnown = hasAnyMic(player);
@@ -3086,5 +3582,19 @@ system.runInterval(() => {
 }, 100);
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.15.27 — personalized phone item name"
+  "[VCMumbleItem/BP] Loaded v2.15.39 — close ATM after successful transactions"
 );
+
+// Verify real item registration and per-item metadata without giving test items.
+system.run(() => {
+  for (const id of Object.values(BANK_CARD_IDS)) {
+    try {
+      const card = new ItemStack(id, 1);
+      card.setDynamicProperty(BANK_CARD_ACCOUNT, "test");
+      card.nameTag = "บัตร - ทดสอบ";
+      console.warn(`[SleepyBank] CARD_READY id=${card.typeId}`);
+    } catch (e) { console.warn(`[SleepyBank] CARD_NOT_READY id=${id}: ${e}`); }
+  }
+});
+
+system.runInterval(() => { try { deliverBankNotifications(); } catch (e) { console.warn(`[SleepyBank] NOTIFY_FAILED: ${e}`); } }, 40);

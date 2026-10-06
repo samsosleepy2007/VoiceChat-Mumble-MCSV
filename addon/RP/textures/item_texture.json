@@ -28,6 +28,15 @@
     },
     "1000": {
       "textures": "textures/items/1000"
+    },
+    "BlackCard": {
+      "textures": "textures/items/BlackCard"
+    },
+    "WhiteCard": {
+      "textures": "textures/items/WhiteCard"
+    },
+    "modern_atm_item": {
+      "textures": "textures/items/modern_atm_item"
     }
   }
 }

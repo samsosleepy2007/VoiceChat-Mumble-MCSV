@@ -13,7 +13,7 @@
       },
       "minecraft:icon": "voicecraft_mic_on",
       "minecraft:max_stack_size": 1,
-      "minecraft:allow_off_hand": true,
+      "minecraft:allow_off_hand": false,
       "minecraft:interact_button": "VC Mumble Settings",
       "vcmumble:open_settings": {}
     }

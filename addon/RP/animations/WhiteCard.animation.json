@@ -1,0 +1,22 @@
+{
+  "format_version": "1.8.0",
+  "animations": {
+    "animation.yXzflwGwSLGzYhW": {
+      "loop": true,
+      "bones": {
+        "bAytvREzemPqSJlg": {
+          "rotation": {
+            "0.0": {
+              "post": [
+                "variable.sx_ECvPhzkz",
+                "variable.sy_IoeHWjrr",
+                0
+              ],
+              "lerp_mode": "catmullrom"
+            }
+          }
+        }
+      }
+    }
+  }
+}

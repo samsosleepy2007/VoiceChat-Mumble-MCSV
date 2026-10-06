@@ -35,6 +35,22 @@
           "stream": true
         }
       ]
+    },
+    "sleepybank.receive": {
+      "category": "ui",
+      "sounds": [
+        {
+          "name": "sounds/sleepybank/receive"
+        }
+      ]
+    },
+    "sleepybank.pay_success": {
+      "category": "ui",
+      "sounds": [
+        {
+          "name": "sounds/sleepybank/pay_success"
+        }
+      ]
     }
   }
 }

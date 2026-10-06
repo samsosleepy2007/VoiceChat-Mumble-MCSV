@@ -2,6 +2,14 @@
 
 **One-file Endstone plugin** สำหรับเปิด Mumble Server และทำ Minecraft Bedrock proximity voice บน MCSV โดยตรง
 
+## Item Mic v2.15.29 — Credit cards / mainhand only
+
+แอดออนล่าสุด: [VC_Mumble_ItemMic_v2.15.29_MicFix.mcaddon](release-assets/VC_Mumble_ItemMic_v2.15.29_MicFix.mcaddon)
+
+เพิ่ม `custom:BlackCard` และ `custom:WhiteCard` พร้อมโมเดลและ textures จาก Card ทั้งสองใบ
+ปิดการใส่มือซ้ายของทุกไอเทม รวมถึงไมค์และ SleepyPhone และนำ logic บังคับเปิดไมค์ในมือซ้ายออก
+ไอเทมเดิมในมือซ้ายจะย้ายกลับกระเป๋าเมื่อมีที่ว่าง โดยรักษาข้อมูลโทรศัพท์เดิมไว้
+
 ## Item Mic v2.15.4 — Money items
 
 แอดออน: [VC_Mumble_ItemMic_v2.15.4_Money.mcaddon](release-assets/VC_Mumble_ItemMic_v2.15.4_Money.mcaddon)
