@@ -7,8 +7,6 @@
  el('mcsv-form').addEventListener('submit',async event=>{
   event.preventDefault();const button=el('check-server'),result=el('check-result');button.disabled=true;result.hidden=false;result.className='check-result';result.textContent='กำลังตรวจสอบเซิร์ฟเวอร์…';el('reinstall-help').hidden=true;
   try{
-   const s=await fetch('/api/auth/session',{cache:'no-store'});const account=await s.json();if(!s.ok)throw Error('auth_unavailable');
-   if(!account.user){result.textContent='กรุณาเข้าสู่ระบบด้วย Discord ก่อนตรวจ API Key';return;}
    const response=await fetch('/api/mcsv/check',{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',body:JSON.stringify({apiKey:el('mcsv-key').value.trim()})});const data=await response.json();
    if(!response.ok){if(data.error==='login_required'){result.textContent='เซสชันหมดอายุหรือยังไม่เป็นสมาชิก Discord กรุณาเข้าสู่ระบบใหม่';return;}const failure=Error(data.error);failure.reference=data.reference;throw failure;}
    if(data.compatible===true){result.classList.add('success');result.textContent='✓ '+data.server.name+' เป็น Minecraft Bedrock · Endstone รองรับระบบไมค์ และพร้อมสำหรับขั้นตอนติดตั้ง';}
