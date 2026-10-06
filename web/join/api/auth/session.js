@@ -1,0 +1,2 @@
+import { headers, configured, session } from '../../lib/auth.js';
+export default async function handler(req,res){headers(res);if(req.method!=='GET')return res.status(405).end();if(!configured())return res.status(200).json({user:null,configured:false});try{const s=await session(req,res);const valid=s.user && /^\d{17,20}$/.test(s.user.id) && typeof s.user.name==='string' && Number.isFinite(s.loggedInAt) && Date.now()-s.loggedInAt<86400000;return res.status(200).json({user:valid?s.user:null,configured:true});}catch{return res.status(200).json({user:null,configured:true});}}

@@ -1,7 +1,9 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const { parseInvitation } = require('../web/join/join.js');
+const parserContext = { URL };
+vm.runInNewContext(fs.readFileSync(require.resolve('../web/join/join.js'), 'utf8'), parserContext);
+const { parseInvitation } = parserContext;
 assert.equal(parseInvitation('#mumble://example.com:18655/').address, 'example.com:18655');
 assert.equal(parseInvitation('#mumble://example.com/').address, 'example.com:64738');
 assert.equal(parseInvitation('#mumble://[::1]:18655/').address, '[::1]:18655');
