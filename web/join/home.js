@@ -1,6 +1,6 @@
 const el = id => document.getElementById(id);
 el('invite').addEventListener('submit', event => {
-  event.preventDefault(); el('result').hidden = true; el('status').classList.remove('error');
+  event.preventDefault(); el('result').hidden = true; document.body.classList.remove('generated'); el('status').classList.remove('error');
   try {
     let raw = el('address').value.trim();
     if (!raw.startsWith('mumble://')) {
@@ -11,7 +11,7 @@ el('invite').addEventListener('submit', event => {
     const {uri} = parseInvitation('#' + raw);
     const link = new URL('/join/', location.origin); link.hash = uri;
     el('link').value = link.href; el('visit').href = link.href;
-    el('result').hidden = false; el('status').textContent = 'สร้างลิงก์แล้ว ส่งลิงก์นี้ให้เพื่อนได้เลย';
+    el('result').hidden = false; document.body.classList.add('generated'); el('status').textContent = 'สร้างลิงก์แล้ว ส่งลิงก์นี้ให้เพื่อนได้เลย';
   } catch { el('status').classList.add('error'); el('status').textContent = 'กรุณาตรวจที่อยู่เซิร์ฟเวอร์และพอร์ต (1–65535)'; }
 });
 el('copy').addEventListener('click', async () => {
