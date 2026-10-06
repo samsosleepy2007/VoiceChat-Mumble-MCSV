@@ -1,0 +1,33 @@
+name: Publish verified Web Join download
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+  actions: read
+jobs:
+  publish:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[publish-webjoin]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: VC-Mumla-v0.6-webjoin
+          run-id: 37459019134
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: out
+      - name: Stage verified APK
+        run: |
+          mkdir -p web/join/downloads
+          cp out/VC-Mumla-v0.6-webjoin-debug.apk web/join/downloads/VC-Mumla-Web-Join.apk
+          cd web/join/downloads
+          sha256sum VC-Mumla-Web-Join.apk > SHA256SUMS.txt
+      - name: Save website download
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web/join/downloads
+          git diff --cached --quiet || git commit -m "Publish verified VC Mumla Web Join APK on website"
+          git push origin HEAD:main
