@@ -3,12 +3,12 @@ import { readFile } from 'node:fs/promises';
 import { JSDOM } from '../web/join/node_modules/jsdom/lib/api.js';
 const html=await readFile(new URL('../web/join/install.html',import.meta.url),'utf8');const script=await readFile(new URL('../web/join/install.js',import.meta.url),'utf8');
 async function page(plan){
- const dom=new JSDOM(html,{url:'https://sleepyvoice-join.vercel.app/install',runScripts:'outside-only'});const w=dom.window;const requests=[];
+ const dom=new JSDOM(html,{url:'https://sleepyvoice-join.vercel.app/install',runScripts:'outside-only'});const w=dom.window;const requests=[];let tick=null;w.setInterval=fn=>{tick=fn;return 1;};w.clearInterval=()=>{tick=null;};
  w.scrollTo=()=>{};w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};w.HTMLDialogElement.prototype.close=function(){this.open=false;};
  w.latticeLoader=(node)=>{node.hidden=false;return {label(){},finish(state,text){node.textContent=text;}};};
  w.fetch=async(url,options)=>{const body=JSON.parse(options.body);requests.push({url,body});return {ok:true,json:async()=>url==='/api/payments/verify'?{paid:true}:JSON.parse(JSON.stringify(plan))};};
  w.eval(script);w.document.getElementById('mcsv-key').value='mcsv_private_test';
- w.document.getElementById('mcsv-form').dispatchEvent(new w.Event('submit',{cancelable:true}));await new Promise(r=>setTimeout(r,5));return {dom,w,requests,el:id=>w.document.getElementById(id)};
+ w.document.getElementById('mcsv-form').dispatchEvent(new w.Event('submit',{cancelable:true}));await new Promise(r=>setTimeout(r,5));return {dom,w,requests,tick:()=>tick?.(),el:id=>w.document.getElementById(id)};
 }
 const base={compatible:true,installAllowed:true,server:{id:'server',name:'Server'},world:'world',ports:[18655,20000],voicePort:18655};
 const checkout={required:true,paid:false,status:'pending',orderId:'12345678-1234-1234-1234-123456789abc',amountSatang:25000,expiresAt:new Date(Date.now()+1800000).toISOString(),methods:{promptpay:true,truemoney:true},receiver:'Test Receiver',truemoneyPhone:'0933402606',promptpayId:'0812345678',qr:'data:image/png;base64,test'};
@@ -30,3 +30,5 @@ latest.el('keep-installed').click();assert(!latest.el('reinstall-dialog').open);
 latest.el('mcsv-form').dispatchEvent(new latest.w.Event('submit',{cancelable:true}));await new Promise(r=>setTimeout(r,5));latest.el('confirm-reinstall').click();assert(latest.el('install-dialog').open);latest.dom.window.close();
 const update=await page({...base,installation:{present:true,status:'update',latest:{plugin:'0.5.5',addon:'2.15.39'}},payment:{required:false,reason:'installed'}});assert(update.el('install-dialog').open);assert(!update.el('reinstall-dialog').open);assert(update.el('payment-page').hidden);update.dom.window.close();
 console.log('PASS installation UI: latest asks to reinstall, cancellation does nothing, old version updates without checkout');
+
+const countdown=await page({...base,payment:{...checkout,expiresAt:new Date(Date.now()+60000).toISOString()}});assert.match(countdown.el('payment-expiry').textContent,/เหลือเวลาชำระ (59|60) วินาที/);assert(!html.includes('ตรวจด้วย SlipOK'));const now=countdown.w.Date.now;countdown.w.Date.now=()=>now()+30000;countdown.tick();assert.match(countdown.el('payment-expiry').textContent,/เหลือเวลาชำระ (29|30) วินาที/);countdown.w.Date.now=()=>now()+61000;countdown.tick();assert.match(countdown.el('payment-expiry').textContent,/หมดเวลาชำระ/);assert(countdown.el('payment-submit').disabled);countdown.el('payment-form').dispatchEvent(new countdown.w.Event('submit',{cancelable:true}));await new Promise(r=>setTimeout(r,5));assert.equal(countdown.requests.length,1);countdown.el('payment-back').click();assert(!countdown.w.document.body.classList.contains('paying'));countdown.dom.window.close();console.log('PASS countdown: seconds decrease against expiry, expired checkout blocks submission, back exits full-screen payment');
