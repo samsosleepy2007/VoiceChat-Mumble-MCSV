@@ -1,0 +1,44 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { satang,voucherCode,slipImage,checkSlip,redeemEnvelope,PaymentError } from '../web/join/lib/payment-providers.js';
+import { paymentConfig,paymentStore,payOrder,requirePayment } from '../web/join/lib/payments.js';
+import { PGlite } from '../web/join/node_modules/@electric-sql/pglite/dist/index.js';
+
+assert.equal(satang('100.25'),10025);for(const bad of ['1e2','-1','1.123',NaN,'100abc'])assert.throws(()=>satang(bad));
+const link='https://gift.truemoney.com/campaign/?v=abcdef0123456789';assert.equal(voucherCode(link),'abcdef0123456789');
+for(const url of ['https://evil.test/campaign/?v=abcdef0123456789','https://gift.truemoney.com.evil.test/campaign/?v=abcdef0123456789','http://gift.truemoney.com/campaign/?v=abcdef0123456789'])assert.throws(()=>voucherCode(url));
+assert.throws(()=>slipImage(Buffer.from('<svg/>').toString('base64')));assert.throws(()=>paymentConfig({}));
+const image=slipImage(Buffer.from('89504e470d0a1a0a00000000','hex').toString('base64'));
+const config={amount:10000,promptpay:true,truemoney:true,branch:'123',key:'private-test',phone:'0812345678'};
+const order={amount_satang:10000,created_at:new Date()};
+const valid={success:true,data:{success:true,amount:100,sendingBank:'004',transRef:'bank-ref',transTimestamp:new Date().toISOString()}};
+let calls=0;
+const fetcher=async(url,options)=>{calls++;assert.equal(url,'https://api.slipok.com/api/line/apikey/123');assert.equal(options.redirect,'error');assert.equal(options.headers['x-authorization'],'private-test');assert.equal(options.body.get('log'),'true');assert.equal(options.body.get('amount'),'100.00');assert(options.body.get('files') instanceof Blob);return {ok:true,json:async()=>valid};};
+assert.deepEqual(await checkSlip(order,image,config,fetcher),{reference:'slip:004:bank-ref',amount:10000});
+for(const [code,error] of [[1012,'payment_duplicate'],[1013,'payment_amount'],[1014,'payment_receiver'],[1010,'slip_delay']])await assert.rejects(checkSlip(order,image,config,async()=>({ok:false,json:async()=>({code})})),e=>e.code===error);
+for(const data of [{...valid.data,amount:1},{...valid.data,transTimestamp:'2000-01-01T00:00:00Z'},{...valid.data,success:false},{...valid.data,transRef:''}])await assert.rejects(checkSlip(order,image,config,async()=>({ok:true,json:async()=>({success:true,data})})),e=>e.uncertain);
+await assert.rejects(checkSlip(order,image,config,async()=>{throw Error('timeout');}),e=>e.uncertain);
+let redeemed=0;const wallet={verifyVoucher:async()=>({success:true,data:{voucher:{member:1}}}),redeemVoucher:async(phone,code,options)=>{redeemed++;assert.equal(phone,config.phone);assert.equal(options.amount,10000);return {success:true,data:{amount:10000,voucherCode:code,raw:{my_ticket:{amount_baht:'100.00'}}}};}};
+assert.equal((await redeemEnvelope(order,'abcdef0123456789',config,wallet)).amount,10000);
+await assert.rejects(redeemEnvelope(order,'abcdef0123456789',config,{...wallet,verifyVoucher:async()=>({success:true,data:{voucher:{member:2}}})}),e=>e.code==='voucher_single');assert.equal(redeemed,1);
+await assert.rejects(redeemEnvelope(order,'abcdef0123456789',config,{...wallet,redeemVoucher:async()=>({success:false,code:'TIMEOUT'})}),e=>e.uncertain);
+
+// Embedded PostgreSQL exercises the actual schema, row state and unique constraints.
+const db=new PGlite();await db.exec(await readFile(new URL('../web/join/lib/payment-schema.sql',import.meta.url),'utf8'));
+const adapter={query:async(sql,args)=>{const r=await db.query(sql,args);return {rows:r.rows,rowCount:r.rows.length||r.affectedRows||0};},connect:async()=>({...adapter,release(){}})};
+const store=paymentStore(adapter);const o=await store.checkout('user-a','server-a',10000);assert.equal((await store.checkout('user-a','server-a',10000)).id,o.id);
+let verified=0;const providers={redeemEnvelope:async()=>{verified++;return {reference:'voucher:unique',amount:10000};}};
+const body={orderId:o.id,method:'truemoney',voucher:link};
+await assert.rejects(payOrder('user-b',body,store,config,providers),e=>e.code==='payment_order');assert.equal(verified,0);
+assert.equal((await payOrder('user-a',body,store,config,providers)).paid,true);assert(await store.entitled('user-a','server-a'));assert(!await store.entitled('user-a','server-b'));assert(!await store.entitled('user-b','server-a'));
+assert.equal((await payOrder('user-a',body,store,config,providers)).paid,true);assert.equal(verified,1);assert.equal((await store.checkout('user-a','server-a',10000)).status,'paid');
+const other=await store.checkout('user-b','server-b',10000);await assert.rejects(payOrder('user-b',{...body,orderId:other.id},store,config,providers),e=>e.code==='payment_duplicate');assert.equal(verified,1);
+const uncertain=await store.checkout('user-a','server-c',10000);const uncertainBody={...body,orderId:uncertain.id,voucher:link.replace('abcdef','abcdee')};
+await assert.rejects(payOrder('user-a',uncertainBody,store,config,{redeemEnvelope:async()=>{throw new PaymentError('payment_review',true);}}),e=>e.uncertain);
+assert.equal((await store.order(uncertain.id,'user-a')).status,'review');assert(!await store.entitled('user-a','server-c'));assert.equal((await store.checkout('user-a','server-c',10000)).id,uncertain.id);
+await assert.rejects(payOrder('user-a',uncertainBody,store,config,providers),e=>e.code==='payment_review');
+const expired=await store.checkout('user-c','server-d',10000);await db.query("UPDATE sleepy_payment_orders SET expires_at=now()-interval '1 minute' WHERE id=$1",[expired.id]);await assert.rejects(store.begin(expired.id,'user-c','unused','truemoney'),e=>e.code==='payment_expired');
+const newer=await store.checkout('user-c','server-d',10000);assert.notEqual(newer.id,expired.id);
+const sameRef=await store.checkout('user-d','server-e',10000);await assert.rejects(payOrder('user-d',{...body,orderId:sameRef.id,voucher:link.replace('abcdef','abcddd')},store,config,providers),e=>e.uncertain);assert(!await store.entitled('user-d','server-e'));
+process.env.PAYMENTS_ENABLED='true';await assert.rejects(requirePayment('user','server'),e=>e.code==='payment_unavailable');delete process.env.PAYMENTS_ENABLED;
+await db.close();console.log('PASS payments: SlipOK log/amount/account errors, old slips, TrueMoney amount and single recipient, SQL duplicate protection, ownership, retries, expiry, ambiguous recovery and fail-closed configuration');

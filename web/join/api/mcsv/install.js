@@ -3,6 +3,7 @@ import { headers,configured,session,ORIGIN } from '../../lib/auth.js';
 import { readMember,GUILD_ID } from '../../lib/guild.js';
 import { MCSVError } from '../../lib/mcsv.js';
 import { createMCSVClient,prepareInstallation,publicPlan,installOnMCSV,fetchArtifacts,installationStatus } from '../../lib/mcsv-install.js';
+import { checkoutPayment,requirePayment,PaymentError } from '../../lib/payments.js';
 
 const RELEASE='https://github.com/samsosleepy2007/VoiceChat-Mumble-MCSV/releases/download/sleepymumla-v0.6.1/';
 let artifactPromise;
@@ -22,11 +23,16 @@ export default async function handler(req,res){
   stage='request_body';const body=typeof req.body==='string'?JSON.parse(req.body):req.body;
   if(!body||!['prepare','install','status'].includes(body.action)||JSON.stringify(body).length>4096)return res.status(400).json({error:'format'});
   stage='prepare';const client=createMCSVClient(body.apiKey);
-  if(body.action==='prepare')return res.status(200).json(publicPlan(await prepareInstallation(client)));
+  if(body.action==='prepare'){
+   const plan=publicPlan(await prepareInstallation(client));
+   if(plan.compatible&&plan.installAllowed){stage='payment';plan.payment=await checkoutPayment(s.user.id,plan.server.id);}
+   return res.status(200).json(plan);
+  }
   if(body.action==='status')return res.status(200).json(await installationStatus(client,s.installPending));
   if(body.confirm!==true||typeof body.serverId!=='string'||typeof body.world!=='string'||!Number.isInteger(body.voicePort))return res.status(400).json({error:'format'});
+  stage='payment';await requirePayment(s.user.id,body.serverId);
   stage='install';const result=await installOnMCSV(client,body,artifacts);s.installPending={serverId:result.server.id,host:result.server.host,voicePort:result.voicePort,action:result.powerAction,previousUptime:result.previousUptime,requestedAt:Date.now()};await s.save();return res.status(200).json(result);
- }catch(error){const code=error instanceof MCSVError?error.code:stage==='request_body'?'format':'auth_check_unavailable';const partial=error.partial===true;
+ }catch(error){const code=error instanceof MCSVError||error instanceof PaymentError?error.code:stage==='request_body'?'format':stage==='payment'?'payment_unavailable':'auth_check_unavailable';const partial=error.partial===true;
   console.warn(JSON.stringify({event:'mcsv_install_failed',reference,stage:error.stage||stage,code,partial,upstreamStatus:error instanceof MCSVError?error.status:null}));
   return res.status(code==='permission'?403:['invalid_key','format','rejected','invalid_port'].includes(code)?400:['server_running','busy','server_changed','existing_version','existing_plugin','duplicate_pack'].includes(code)?409:503).json({error:code,reference,partial,stage:error.stage||stage});
  }
