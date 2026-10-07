@@ -1,0 +1,22 @@
+// Read-only deployment checks. Never redeem an envelope or upload a slip here.
+import pg from 'pg';
+import { paymentConfig } from './payments.js';
+console.log('PAYMENT_CONFIG_CHECK '+JSON.stringify({branchPresent:Boolean(process.env.SLIPOK_BRANCH_ID),branchNumeric:/^\d+$/.test((process.env.SLIPOK_BRANCH_ID||'').trim()),keyPresent:Boolean(process.env.SLIPOK_API_KEY),receiverPresent:Boolean(process.env.PAYMENT_RECEIVER_NAME),promptpayValid:/^(0\d{9}|\d{13}|\d{15})$/.test(process.env.PROMPTPAY_ID||'')}));
+const config=paymentConfig();
+const client=new pg.Client({connectionString:process.env.PAYMENT_DATABASE_URL||process.env.DATABASE_URL,connectionTimeoutMillis:10000});
+try{
+ await client.connect();
+ const result=await client.query("SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('sleepy_payment_orders','sleepy_payment_attempts','sleepy_install_entitlements')");
+ if(result.rows.length!==3)throw Error('payment_schema');
+ const column=await client.query("SELECT column_name FROM information_schema.columns WHERE table_name='sleepy_install_entitlements' AND column_name='installed_at'");if(column.rows.length!==1)throw Error('installation_grant_schema');
+ const history=await client.query("SELECT column_name FROM information_schema.columns WHERE table_name='sleepy_payment_orders' AND column_name IN ('purchase_number','installation_state','server_name')");if(history.rows.length!==3)throw Error('history_schema');console.log('PAYMENT_DATABASE_OK');
+}catch{console.error('PAYMENT_DATABASE_FAILED');process.exitCode=1;}finally{await client.end();}
+if(config.slipok){
+ try{
+  const response=await fetch('https://api.slipok.com/api/line/apikey/'+config.branch+'/quota',{headers:{'x-authorization':config.key},redirect:'error',signal:AbortSignal.timeout(15000)});
+  const result=await response.json();
+  if(!response.ok||result.success!==true||!Number.isFinite(result.data?.quota))throw Error('slipok_quota');
+  console.log('SLIPOK_QUOTA_OK '+JSON.stringify({quota:result.data.quota,specialQuota:result.data.specialQuota??0}));
+ }catch{console.error('SLIPOK_PREFLIGHT_FAILED');process.exitCode=1;}
+}
+console.log('PAYMENT_CHANNELS '+JSON.stringify({promptpay:config.promptpay,truemoney:config.truemoney,mode:'slipok',amountSatang:config.amount}));

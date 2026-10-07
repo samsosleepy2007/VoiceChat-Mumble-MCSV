@@ -24,6 +24,7 @@ import android.util.Log;
 
 import se.lublin.humla.R;
 import se.lublin.humla.audio.AudioInput;
+import se.lublin.humla.audio.SpeakerAudioRoute;
 import se.lublin.humla.audio.AudioOutput;
 import se.lublin.humla.audio.encoder.CELT11Encoder;
 import se.lublin.humla.audio.encoder.CELT7Encoder;
@@ -64,6 +65,7 @@ public class AudioHandler extends HumlaNetworkListener implements AudioInput.Aud
     private final AudioManager mAudioManager;
     private int mVcPreviousAudioMode = AudioManager.MODE_NORMAL; // VC_AEC_AUDIO_MODE
     private boolean mVcCommunicationModeActive = false;
+    private SpeakerAudioRoute mVcSpeakerRoute;
     private final AudioInput mInput;
     private final AudioOutput mOutput;
     private AudioOutput.AudioOutputListener mOutputListener;
@@ -136,6 +138,13 @@ public class AudioHandler extends HumlaNetworkListener implements AudioInput.Aud
         }
         mAudioSource = actualSource;
         mAudioStream = actualStream;
+
+        // AEC communication mode can otherwise default to the quiet earpiece.
+        // Handset mode and the existing Bluetooth SCO handler keep their own routing.
+        if (mVcCommunicationModeActive && mAudioStream == AudioManager.STREAM_MUSIC && !mBluetoothOn) {
+            mVcSpeakerRoute = new SpeakerAudioRoute(mAudioManager);
+            mVcSpeakerRoute.start();
+        }
 
         try {
             mInput = new AudioInput(this, mAudioSource, mSampleRate, mEchoCancellationMethod);
@@ -341,6 +350,10 @@ public class AudioHandler extends HumlaNetworkListener implements AudioInput.Aud
     }
 
     private void restoreVcAudioMode() {
+        if (mVcSpeakerRoute != null) {
+            mVcSpeakerRoute.close();
+            mVcSpeakerRoute = null;
+        }
         if (!mVcCommunicationModeActive) {
             return;
         }

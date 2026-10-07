@@ -21,7 +21,7 @@ APK ปัจจุบันเป็น debug build ลายเซ็นแต
 
 ## ซอร์สและที่มา
 
-- [ซอร์สแอปรุ่นปัจจุบันบน sleepy-mumla-branding](https://github.com/samsosleepy2007/VoiceChat-Mumble-MCSV/tree/sleepy-mumla-branding/apps/vc-mumla/source)
+- [ซอร์สแอปรุ่นปัจจุบันบน main](https://github.com/samsosleepy2007/VoiceChat-Mumble-MCSV/tree/main/apps/vc-mumla/source)
 - [Provenance ของ upstream และรุ่นตั้งต้น](PROVENANCE.json)
 - [สคริปต์ปรับแต่ง VC เดิม](scripts/patch-mumla-vc-client.py)
 
@@ -29,11 +29,11 @@ APK ปัจจุบันเป็น debug build ลายเซ็นแต
 
 ## Build
 
-ใช้ **Java 21, Android SDK 36, Build Tools 36.0.0 และ NDK 25.1.8937393** และ checkout สาขา `sleepy-mumla-branding` ก่อน
+ใช้ **Java 21, Android SDK 36, Build Tools 36.0.0 และ NDK 25.1.8937393** และ checkout สาขา `main` ก่อน
 
 ```sh
 # เริ่มจาก root ของ repository
-git switch sleepy-mumla-branding
+git switch main
 cd apps/vc-mumla/source/libraries/humla/libs/humla-spongycastle
 chmod +x ../../gradlew
 ../../gradlew jar --no-daemon

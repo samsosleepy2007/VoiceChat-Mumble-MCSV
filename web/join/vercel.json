@@ -1,48 +1,85 @@
 {
-  "headers": [
+  "functions": {
+    "api/mcsv/install.js": {
+      "maxDuration": 300
+    }
+  },
+  "routes": [
     {
-      "source": "/(.*)",
-      "headers": [
-        {
-          "key": "Referrer-Policy",
-          "value": "no-referrer"
-        },
-        {
-          "key": "X-Content-Type-Options",
-          "value": "nosniff"
-        }
-      ]
+      "src": "^/(.*)$",
+      "headers": {
+        "Referrer-Policy": "no-referrer",
+        "X-Content-Type-Options": "nosniff"
+      },
+      "continue": true
     },
     {
-      "source": "/downloads/(.*)",
-      "headers": [
-        {
-          "key": "Content-Type",
-          "value": "application/vnd.android.package-archive"
-        },
-        {
-          "key": "Content-Disposition",
-          "value": "attachment; filename=\"VC-Mumla-Web-Join.apk\""
-        }
-      ]
+      "src": "^/downloads/VC-Mumla-Web-Join.apk$",
+      "headers": {
+        "Content-Type": "application/vnd.android.package-archive",
+        "Content-Disposition": "attachment; filename=\"SleepyMumla.apk\""
+      },
+      "continue": true
+    },
+    {
+      "src": "^/download$",
+      "headers": {
+        "Content-Type": "application/vnd.android.package-archive",
+        "Content-Disposition": "attachment; filename=\"SleepyMumla.apk\""
+      },
+      "continue": true
+    },
+    {
+      "src": "^/(?:lib(?:/.*)?|(?:AUTH_SETUP|PAYMENTS_SETUP)\\.md|vercel\\.json|package(?:-lock)?\\.json)$",
+      "dest": "/api/not-found"
+    },
+    {
+      "src": "^/download$",
+      "dest": "https://raw.githubusercontent.com/samsosleepy2007/VoiceChat-Mumble-MCSV/5a2e5f09482bdcc8079a1a04323727f0edb52204/web/join/downloads/SleepyMumla-v0.6.3.apk"
+    },
+    {
+      "src": "^/downloads/VC-Mumla-Web-Join.apk$",
+      "dest": "https://raw.githubusercontent.com/samsosleepy2007/VoiceChat-Mumble-MCSV/5a2e5f09482bdcc8079a1a04323727f0edb52204/web/join/downloads/SleepyMumla-v0.6.3.apk"
+    },
+    {
+      "src": "^/$",
+      "dest": "/home.html"
+    },
+    {
+      "src": "^/join$",
+      "dest": "/join.html"
+    },
+    {
+      "src": "^/join/$",
+      "dest": "/join.html"
+    },
+    {
+      "src": "^/join/join.js$",
+      "dest": "/join.js"
+    },
+    {
+      "src": "^/install$",
+      "dest": "/install.html"
+    },
+    {
+      "src": "^/install/$",
+      "dest": "/install.html"
+    },
+    {
+      "src": "^/history/?$",
+      "dest": "/history.html"
+    },
+    {
+      "handle": "filesystem"
     }
   ],
-  "rewrites": [
+  "regions": [
+    "sin1"
+  ],
+  "crons": [
     {
-      "source": "/",
-      "destination": "/home.html"
-    },
-    {
-      "source": "/join",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/join/",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/join/join.js",
-      "destination": "/join.js"
+      "path": "/api/cron/payment-retention",
+      "schedule": "0 18 * * *"
     }
   ]
 }

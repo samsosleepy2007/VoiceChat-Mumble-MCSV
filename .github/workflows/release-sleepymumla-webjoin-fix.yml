@@ -1,0 +1,62 @@
+name: SleepyMumla v0.6.3 loudspeaker routing
+on:
+  push:
+    branches: [sleepy-mumla-branding]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  release:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release-sleepymumla-v0.6.3]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Install Android toolchain
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" "ndk;25.1.8937393"'
+      - name: Build crypto libraries
+        working-directory: apps/vc-mumla/source/libraries/humla/libs/humla-spongycastle
+        run: |
+          chmod +x ../../gradlew
+          ../../gradlew jar --no-daemon
+      - name: Test URL joins and speaker routing, then build APK
+        working-directory: apps/vc-mumla/source
+        run: |
+          python3 - <<'PYBUILD'
+          from pathlib import Path
+          p=Path('app/build.gradle')
+          p.write_text(p.read_text().replace('applicationId "se.lublin.mumla.beta"','applicationId "se.lublin.mumla.webjoin"').replace('versionName gitDescribe','versionName "0.6.3"'))
+          PYBUILD
+          chmod +x gradlew
+          ./gradlew :libraries:humla:testDebugUnitTest :app:assembleBetaDebug --no-daemon --stacktrace
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          cp app/build/outputs/apk/beta/debug/*.apk "$GITHUB_WORKSPACE/out/SleepyMumla-v0.6.3.apk"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$GITHUB_WORKSPACE/out/SleepyMumla-v0.6.3.apk"
+      - name: Include plugin and addon
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download sleepymumla-v0.6.1 --repo "$GITHUB_REPOSITORY" --pattern 'endstone_mumble_host-0.5.5-py3-none-any.whl' --pattern 'VC_Mumble_ItemMic_v2.15.39_MicFix.mcaddon' --dir out
+          (cd out && sha256sum *.apk *.whl *.mcaddon > SHA256SUMS-v0.6.3.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SleepyMumla-v0.6.3
+          path: out/*
+      - name: Publish separate release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create sleepymumla-v0.6.3 out/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title 'SleepyMumla v0.6.3 — Default voice output to main speaker' --notes 'Route voice to the main speaker by default with system echo cancellation; respect wired, USB and supported Bluetooth headsets and restore routing on disconnect. Includes the existing Endstone MumbleHost 0.5.5 plugin and Item Mic 2.15.39 addon.' --latest
+      - name: Store website download on the development branch
+        run: |
+          mkdir -p web/join/downloads
+          cp out/SleepyMumla-v0.6.3.apk web/join/downloads/
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add web/join/downloads/SleepyMumla-v0.6.3.apk
+          git commit -m 'Add SleepyMumla v0.6.3 website download'
+          git push origin HEAD:sleepy-mumla-branding

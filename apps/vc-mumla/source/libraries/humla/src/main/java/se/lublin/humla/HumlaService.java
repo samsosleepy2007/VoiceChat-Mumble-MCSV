@@ -353,7 +353,11 @@ public class HumlaService extends Service implements IHumlaService, IHumlaSessio
 
         final Mumble.Authenticate.Builder auth = Mumble.Authenticate.newBuilder();
         auth.setUsername(mServer.getUsername());
-        auth.setPassword(mServer.getPassword());
+        // URL joins and older saved servers may have no password. Protobuf rejects null.
+        String password = mServer.getPassword();
+        if (password != null && !password.isEmpty()) {
+            auth.setPassword(password);
+        }
         auth.addCeltVersions(CELT7.getBitstreamVersion());
         // FIXME: resolve issues with CELT 11 robot voices.
 //            auth.addCeltVersions(Constants.CELT_11_VERSION);

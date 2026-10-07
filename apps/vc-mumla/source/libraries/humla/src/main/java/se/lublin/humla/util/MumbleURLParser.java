@@ -52,7 +52,7 @@ public class MumbleURLParser {
         Matcher matcher = URL_PATTERN.matcher(url);
         if(matcher.matches()) {
             String username = decode(matcher.group(2));
-            String password = decode(matcher.group(4));
+            String password = matcher.group(4) == null ? "" : decode(matcher.group(4));
             String host = matcher.group(5);
             String portString = matcher.group(7);
             int port;

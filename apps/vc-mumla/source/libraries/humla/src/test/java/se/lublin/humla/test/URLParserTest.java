@@ -90,6 +90,29 @@ public class URLParserTest extends TestCase {
         }
     }
 
+    public void testWebJoinWithoutPassword() throws Exception {
+        Server server = MumbleURLParser.parseURL("mumble://Sam4014XD@sv7.mcsv.me:18655/");
+        assertEquals("Sam4014XD", server.getUsername());
+        assertEquals("", server.getPassword());
+        assertEquals("sv7.mcsv.me", server.getHost());
+        assertEquals(18655, server.getPort());
+    }
+
+    public void testWebJoinEncodedXboxName() throws Exception {
+        Server server = MumbleURLParser.parseURL("mumble://Sam%20SoSleepy%2B1@sv7.mcsv.me:18655/");
+        assertEquals("Sam SoSleepy+1", server.getUsername());
+        assertEquals("", server.getPassword());
+    }
+
+    public void testEncodedPasswordRemainsIntact() throws Exception {
+        Server server = MumbleURLParser.parseURL("mumble://Sam:p%40ss%3Aword%2B1@server.com/");
+        assertEquals("p@ss:word+1", server.getPassword());
+    }
+
+    public void testURLWithoutCredentialsHasEmptyPassword() throws Exception {
+        assertEquals("", MumbleURLParser.parseURL("mumble://server.com/").getPassword());
+    }
+
     public void testInvalidScheme() {
         String url = "grumble://server.com/";
         try {
