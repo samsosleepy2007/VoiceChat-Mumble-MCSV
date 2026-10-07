@@ -1456,7 +1456,7 @@ async function showTouchpad(player, account, authorize) {
   if (!choice || !authorize() || heldPhoneData(player)?.id !== account.phoneId) return false;
   if (choice === "receive") {
     touchpadReceivers.set(player.id, { phoneId: account.phoneId, number: account.number });
-    try { player.playAnimation("animation.sleepybank.touchpad_receive", { controller: "sleepybank_touchpad", blendOutTime: 0.1 }); } catch {}
+    try { player.playAnimation("animation.sleepybank.touchpad_receive", { controller: "sleepybank_touchpad", blendOutTime: 0.1, stopExpression: "0" }); } catch {}
     player.sendMessage("[ SleepyBank ] เปิดทัชแพดรับเงินแล้วกำลังรอเงินเข้า...");
     return true;
   }
@@ -3675,7 +3675,7 @@ system.runInterval(() => {
 }, 100);
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.15.42 — stable touchpad arm loop"
+  "[VCMumbleItem/BP] Loaded v2.15.43 — explicit touchpad animation hold"
 );
 
 // Verify real item registration and per-item metadata without giving test items.
