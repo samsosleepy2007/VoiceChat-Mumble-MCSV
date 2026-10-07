@@ -8,6 +8,7 @@ assert.equal(satang('100.25'),10025);for(const bad of ['1e2','-1','1.123',NaN,'1
 const link='https://gift.truemoney.com/campaign/?v=abcdef0123456789';assert.equal(voucherCode(link),'abcdef0123456789');
 for(const url of ['https://evil.test/campaign/?v=abcdef0123456789','https://gift.truemoney.com.evil.test/campaign/?v=abcdef0123456789','http://gift.truemoney.com/campaign/?v=abcdef0123456789'])assert.throws(()=>voucherCode(url));
 assert.throws(()=>slipImage(Buffer.from('<svg/>').toString('base64')));assert.throws(()=>paymentConfig({}));
+assert.equal(paymentConfig({DATABASE_URL:'postgresql://test.invalid/db',INSTALL_PRICE_SATANG:'24900',TRUEMONEY_PHONE:'0933402606'}).amount,24900);
 const image=slipImage(Buffer.from('89504e470d0a1a0a00000000','hex').toString('base64'));
 const config={amount:10000,promptpay:true,truemoney:true,branch:'123',key:'private-test',phone:'0812345678'};
 const order={amount_satang:10000,created_at:new Date()};
