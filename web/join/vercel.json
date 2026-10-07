@@ -30,7 +30,7 @@
       "continue": true
     },
     {
-      "src": "^/(?:lib(?:/.*)?|vercel\\.json|package(?:-lock)?\\.json)$",
+      "src": "^/(?:lib(?:/.*)?|(?:AUTH_SETUP|PAYMENTS_SETUP)\\.md|vercel\\.json|package(?:-lock)?\\.json)$",
       "dest": "/api/not-found"
     },
     {
@@ -66,7 +66,20 @@
       "dest": "/install.html"
     },
     {
+      "src": "^/history/?$",
+      "dest": "/history.html"
+    },
+    {
       "handle": "filesystem"
+    }
+  ],
+  "regions": [
+    "sin1"
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/payment-retention",
+      "schedule": "0 18 * * *"
     }
   ]
 }

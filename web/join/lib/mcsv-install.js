@@ -5,17 +5,19 @@ import { MCSVError } from './mcsv.js';
 export const WHEEL='endstone_mumble_host-0.5.5-py3-none-any.whl';
 export const PACKS=[{type:'behavior',uuid:'b6411120-cc4e-44a9-b28d-f43b10cafd86',folder:'SleepyMumla_BP'},{type:'resource',uuid:'cb345edb-6e6c-49ac-9950-e2ae07bda214',folder:'SleepyMumla_RP'}];
 const VERSION=[2,15,39];
-const REQUIRED=['server_overview','files_list','files_read','files_read_many','files_read_base64','files_upload_base64','files_decompress','files_write','files_edit','files_compress','domain_info','power_action'];
+const PLUGIN_VERSION=[0,5,5];
+function compareVersion(a,b){if(!Array.isArray(a)||a.length!==3||a.some(n=>!Number.isSafeInteger(n)||n<0))fail('existing_version');for(let i=0;i<3;i++)if(a[i]!==b[i])return a[i]>b[i]?1:-1;return 0;}
+const REQUIRED=['server_overview','files_list','files_read','files_read_many','files_read_base64','files_fetch_url','files_decompress','files_write','files_edit','files_compress','domain_info','power_action'];
 const validName=name=>typeof name==='string'&&name.length>0&&name!=='.'&&name!=='..'&&!/[\\/\x00-\x1f]/.test(name);
 function fail(code){throw new MCSVError(code);}
 export function createMCSVClient(key,request=fetch){
  if(typeof key!=='string'||key.length>512||!/^mcsv_[A-Za-z0-9_-]{8,}$/.test(key))fail('invalid_key');
  async function call(name,args={},catalog=false){
-  let response;
-  try{response=await request('https://api.mcsv.me/api/v1/tools'+(catalog?'':'/'+name),{method:catalog?'GET':'POST',redirect:'error',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},...(catalog?{}:{body:JSON.stringify(args)}),signal:AbortSignal.timeout(30000)});}catch(error){throw new MCSVError(['TimeoutError','AbortError'].includes(error?.name)?'timeout':'unavailable');}
+  let response;const timeoutMs=['files_upload_base64','files_fetch_url','files_decompress','files_compress'].includes(name)?120000:30000;
+  try{response=await request('https://api.mcsv.me/api/v1/tools'+(catalog?'':'/'+name),{method:catalog?'GET':'POST',redirect:'error',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},...(catalog?{}:{body:JSON.stringify(args)}),signal:AbortSignal.timeout(timeoutMs)});}catch(error){const failure=new MCSVError(['TimeoutError','AbortError'].includes(error?.name)?'timeout':'unavailable');failure.operation=name;throw failure;}
   const code={400:'rejected',401:'invalid_key',403:'permission',404:'endpoint',409:'installing',410:'invalid_key',429:'rate_limit'}[response.status];
   if(!response.ok)throw new MCSVError(code||'upstream',response.status);
-  let data;try{data=await response.json();}catch{fail('invalid_response');}
+  let data;try{data=await response.json();}catch(error){const failure=new MCSVError(['TimeoutError','AbortError'].includes(error?.name)?'timeout':'invalid_response');failure.operation=name;throw failure;}
   if(data.ok!==true||(!catalog&&(!data.result||data.result.error||data.result.success===false||data.result.denied)))fail('rejected');
   return catalog?data:data.result;
  }
@@ -41,7 +43,7 @@ async function findExisting(client,root,worldFiles,world){
  const paths=[];
  for(const dir of roots)for(const f of await listing(client,dir)){const target=PACKS.find(p=>dir==='/'+p.type+'_packs'&&f.name.toLowerCase()===p.folder.toLowerCase());if(target&&(f.name!==target.folder||f.is_file))fail('unsafe_layout');if(!f.is_file)paths.push(dir+'/'+f.name+'/manifest.json');}
  if(paths.length>400)fail('unsafe_layout');
- const found={};const reserved=new Map(PACKS.map(p=>['/'+p.type+'_packs/'+p.folder+'/manifest.json',p.uuid]));
+ const found={},versions={};const reserved=new Map(PACKS.map(p=>['/'+p.type+'_packs/'+p.folder+'/manifest.json',p.uuid]));
  for(let i=0;i<paths.length;i+=25){
   const data=await client.call('files_read_many',{paths:paths.slice(i,i+25)});if(!Array.isArray(data.files)||data.files.length!==paths.slice(i,i+25).length)fail('unverified');
   for(const file of data.files){
@@ -51,11 +53,12 @@ async function findExisting(client,root,worldFiles,world){
    let manifest;try{manifest=JSON.parse(file.content);}catch{fail('invalid_pack_list');}
    const reservedUUID=reserved.get('/'+file.path.replace(/^\//,''));if(reservedUUID&&manifest.header?.uuid?.toLowerCase()!==reservedUUID)fail('unsafe_layout');const pack=PACKS.find(p=>p.uuid===manifest.header?.uuid?.toLowerCase());if(!pack)continue;
    if(found[pack.type])fail('duplicate_pack');
-   if(JSON.stringify(manifest.header.version)!==JSON.stringify(VERSION))fail('existing_version');
+   if(compareVersion(manifest.header.version,VERSION)>0)fail('newer_version');
+   versions[pack.type]=manifest.header.version;
    found[pack.type]=file.path.replace(/^\//,'').replace(/\/manifest\.json$/,'');
   }
  }
- return found;
+ return {found,versions};
 }
 export async function prepareInstallation(client){
  const overview=await client.call('server_overview');const info=overview.info;
@@ -75,14 +78,21 @@ export async function prepareInstallation(client){
  const worldFiles=await listing(client,'/worlds/'+world);
  const ports=Array.isArray(info.ports)?[...new Set(info.ports.filter(p=>Number.isInteger(p)&&p>1024&&p<=65535&&p!==info.port&&p!==47855))]:[];
  if(!ports.length)fail('no_voice_port');
- const existing=await findExisting(client,root,worldFiles,world);
+ const {found:existing,versions}=await findExisting(client,root,worldFiles,world);
  const packLists={};for(const pack of PACKS){const filename='world_'+pack.type+'_packs.json';const exists=worldFiles.some(f=>f.name===filename&&f.is_file);const content=exists?await read(client,'/worlds/'+world+'/'+filename):'[]';mergePacks(content,pack.uuid);packLists[pack.type]={exists,content,path:'/worlds/'+world+'/'+filename};}
  let config=null;const pluginFolder=root.some(f=>f.name==='plugins'&&!f.is_file);const pluginFiles=pluginFolder?await listing(client,'/plugins'):[];
- if(pluginFiles.some(f=>f.is_file&&/^endstone_mumble_host-.*\.whl$/i.test(f.name)&&f.name!==WHEEL))fail('existing_plugin');
+ const wheels=pluginFiles.filter(f=>f.is_file&&/^endstone_mumble_host-.*\.whl$/i.test(f.name));
+ const pluginVersions=wheels.map(f=>{const m=/^endstone_mumble_host-(\d+)\.(\d+)\.(\d+)-py3-none-any\.whl$/.exec(f.name);if(!m)fail('existing_plugin');const v=m.slice(1).map(Number);if(compareVersion(v,PLUGIN_VERSION)>0)fail('newer_version');return v;});
+ const obsoletePlugins=wheels.filter(f=>f.name!==WHEEL).map(f=>f.name);
+ if(obsoletePlugins.length&&!allowed('files_delete'))return {compatible:true,server,installAllowed:false,missingTools:['files_delete']};
  if(pluginFiles.some(f=>f.name==='mumble_host'&&!f.is_file)){const entries=await listing(client,'/plugins/mumble_host');if(entries.some(f=>f.name==='config.toml'&&f.is_file)){config=await read(client,'/plugins/mumble_host/config.toml');configEdit(config,ports[0]);}}
  const domain=await client.call('domain_info');const host=domain.node_hostname;if(typeof host!=='string'||!/^[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*\.mcsv\.me$/.test(host))fail('unverified');server.host=host;
- const voicePort=ports.includes(18655)?18655:ports[0];
- return {compatible:true,server,installAllowed:true,world,ports,voicePort,state:overview.runtime?.current_state||'unknown',canStart:allowed('power_action'),internal:{existing,packLists,config,root,pluginFiles}};
+ const configuredPort=config?.match(/^\s*\[mumble\][\s\S]*?^\s*port\s*=\s*(\d+)/m)?.[1];
+ const voicePort=ports.includes(Number(configuredPort))?Number(configuredPort):ports.includes(18655)?18655:ports[0];
+ const present=Boolean(wheels.length||Object.keys(existing).length);
+ const current=wheels.length===1&&wheels[0].name===WHEEL&&PACKS.every(p=>existing[p.type]&&compareVersion(versions[p.type],VERSION)===0&&JSON.parse(packLists[p.type].content).some(e=>e.pack_id.toLowerCase()===p.uuid&&compareVersion(e.version,VERSION)===0));
+ const installation={present,status:current?'current':present?'update':'absent',pluginVersions:pluginVersions.map(v=>v.join('.')),addonVersions:Object.fromEntries(Object.entries(versions).map(([k,v])=>[k,v.join('.')])),latest:{plugin:PLUGIN_VERSION.join('.'),addon:VERSION.join('.')}};
+ return {compatible:true,server,installAllowed:true,world,ports,voicePort,installation,state:overview.runtime?.current_state||'unknown',canStart:allowed('power_action'),internal:{existing,packLists,config,root,pluginFiles,obsoletePlugins}};
 }
 export function publicPlan(plan){const {internal,...publicData}=plan;return publicData;}
 export async function fetchArtifacts(request,release){
@@ -90,6 +100,16 @@ export async function fetchArtifacts(request,release){
  const bytes=[];for(const item of definitions){let response;try{response=await request(release+item.name,{signal:AbortSignal.timeout(30000)});}catch{fail('artifact_unavailable');}if(!response.ok)fail('artifact_unavailable');const buffer=Buffer.from(await response.arrayBuffer());if(buffer.length>4000000||createHash('sha256').update(buffer).digest('hex')!==item.hash)fail('artifact_integrity');bytes.push(buffer);}
  const addon=unzipSync(bytes[1]);const packs={};for(const pack of PACKS){const entry=Object.keys(addon).find(n=>n.includes('_'+(pack.type==='behavior'?'BP':'RP')+'_')&&n.endsWith('.mcpack'));if(!entry)fail('artifact_integrity');const files=unzipSync(addon[entry]);const manifest=JSON.parse(Buffer.from(files['manifest.json']).toString());if(manifest.header.uuid!==pack.uuid||JSON.stringify(manifest.header.version)!==JSON.stringify(VERSION))fail('artifact_integrity');if(Object.keys(files).some(n=>n.startsWith('/')||n.includes('\\')||n.split('/').some(p=>p==='..'||p==='.'||!p)))fail('artifact_integrity');packs[pack.type]=files;}
  return {wheel:bytes[0],packs};
+}
+export function packArchive(source,targets){
+ const files={};for(const pack of PACKS){const target=targets[pack.type]||pack.type+'_packs/'+pack.folder;if(typeof target!=='string'||target.length>512||target.split('/').some(p=>!validName(p)))fail('unsafe_layout');for(const [name,data] of Object.entries(source.packs[pack.type]))files[target+'/'+name]=data;}
+ return Buffer.from(zipSync(files,{level:6,mtime:new Date('2020-01-01T00:00:00Z')}));
+}
+async function transfer(client,source,path,bytes,targets){
+ if(!source.transferOrigin){await client.call('files_upload_base64',{path,content_base64:bytes.toString('base64')});return;}
+ const url=new URL('/api/mcsv/artifact',source.transferOrigin);url.searchParams.set('kind',targets?'packs':'plugin');if(targets)for(const pack of PACKS)if(targets[pack.type])url.searchParams.set(pack.type,targets[pack.type]);
+ const at=path.lastIndexOf('/');await client.call('files_fetch_url',{directory:path.slice(0,at)||'/',filename:path.slice(at+1),url:url.toString()});
+ const result=await client.call('files_read_base64',{path});if(typeof result.content_base64!=='string'||createHash('sha256').update(Buffer.from(result.content_base64,'base64')).digest('hex')!==createHash('sha256').update(bytes).digest('hex'))fail('verification_failed');
 }
 const active=new Set();
 export function backupGroups(paths){
@@ -101,36 +121,38 @@ export function backupGroups(paths){
  }
  return [...groups].map(([root,files])=>({root,files:[...files]}));
 }
-export async function installOnMCSV(client,body,loadArtifacts){
+export async function installOnMCSV(client,body,loadArtifacts,authorize=async()=>{},progress=async()=>{}){
  const plan=await prepareInstallation(client);if(!plan.compatible)fail('incompatible');if(!plan.installAllowed)fail('permission');
  if(plan.server.id!==body.serverId||plan.world!==body.world)fail('server_changed');
  if(!['offline','running'].includes(plan.state))fail('server_running');
  if(!plan.ports.includes(body.voicePort))fail('invalid_port');
  if(body.start===true&&!plan.canStart)fail('permission');
- if(active.has(plan.server.id))fail('busy');active.add(plan.server.id);
+ if(plan.installation.status==='current'&&body.reinstall!==true)fail('reinstall_confirmation');
+ if(active.has(plan.server.id))fail('busy');
+ await authorize(publicPlan(plan));active.add(plan.server.id);
  let stage='download',mutated=false;
  try{
   const source=await loadArtifacts();const internal=plan.internal;
   const backupFiles=Object.values(internal.packLists).filter(p=>p.exists).map(p=>p.path.slice(1));
   for(const path of Object.values(internal.existing))backupFiles.push(path);
   if(internal.config!==null)backupFiles.push('plugins/mumble_host/config.toml');
-  if(internal.pluginFiles.some(f=>f.name===WHEEL))backupFiles.push('plugins/'+WHEEL);
+  for(const f of internal.pluginFiles.filter(f=>f.is_file&&/^endstone_mumble_host-.*\.whl$/i.test(f.name)))backupFiles.push('plugins/'+f.name);
   const backup='SleepyMumla-backup-'+randomUUID()+'.zip',backups=[];stage='backup';
   for(const group of backupGroups(backupFiles)){
    try{const saved=await client.call('files_compress',{...group,name:backup});const expected=(group.root==='/'?'':group.root)+'/'+backup;if(saved.success!==true||saved.path!==expected)fail('backup_failed');backups.push(saved.path);}catch(error){if(error instanceof MCSVError&&error.code==='rejected')error.code='backup_failed';throw error;}
   }
   // Install files before restarting; reject a server already changing power state.
   const runtime=await client.call('server_overview');if(runtime.info?.id!==plan.server.id||!['offline','running'].includes(runtime.runtime?.current_state))fail('server_running');
-  stage='packs';const archiveFiles={};for(const pack of PACKS)for(const [name,data] of Object.entries(source.packs[pack.type]))archiveFiles[(internal.existing[pack.type]||pack.type+'_packs/'+pack.folder)+'/'+name]=data;
-  if(Object.keys(archiveFiles).length){const archive='SleepyMumla-packs-'+randomUUID()+'.zip';mutated=true;await client.call('files_upload_base64',{path:'/'+archive,content_base64:Buffer.from(zipSync(archiveFiles,{level:6})).toString('base64')});await client.call('files_decompress',{root:'/',file:archive});}
-  stage='plugin';mutated=true;await client.call('files_upload_base64',{path:'/plugins/'+WHEEL,content_base64:source.wheel.toString('base64')});
+  stage='packs';const archiveBytes=packArchive(source,internal.existing);
+  const archive='SleepyMumla-packs-'+randomUUID()+'.zip';mutated=true;stage='packs_upload';await transfer(client,source,'/'+archive,archiveBytes,internal.existing);stage='packs_extract';await client.call('files_decompress',{root:'/',file:archive});
+  stage='plugin';mutated=true;await transfer(client,source,'/plugins/'+WHEEL,source.wheel);if(internal.obsoletePlugins.length)await client.call('files_delete',{root:'/plugins',files:internal.obsoletePlugins});
   stage='config';const configPath='/plugins/mumble_host/config.toml';if(internal.config!==null){const edit=configEdit(internal.config,body.voicePort);if(edit.old_string!==edit.new_string)await client.call('files_edit',{path:configPath,edits:[edit]});}else await client.call('files_write',{path:configPath,force_new:true,content:'[tracking]\ninterval_ticks = 4\nposition_epsilon = 0.05\nrotation_epsilon = 1.0\nheartbeat_seconds = 2\n\n[mumble]\nport = '+body.voicePort+'\nusers = 20\n\n[local_state]\nhost = "127.0.0.1"\nport = 47855\nmax_queue = 4096\n\n[voice]\ndefault_range = 30\nmax_range = 60\ndefault_attenuation_level = 3\n'});
   stage='world';for(const pack of PACKS){const item=internal.packLists[pack.type],content=mergePacks(item.content,pack.uuid);if(item.exists){if(item.content!==content)await client.call('files_edit',{path:item.path,edits:[{old_string:item.content,new_string:content}]});}else await client.call('files_write',{path:item.path,content});}
   stage='verify';for(const pack of PACKS){const list=JSON.parse(await read(client,internal.packLists[pack.type].path));if(!list.some(p=>p.pack_id===pack.uuid&&JSON.stringify(p.version)===JSON.stringify(VERSION)))fail('verification_failed');const target=internal.existing[pack.type]||pack.type+'_packs/'+pack.folder;const manifest=JSON.parse(await read(client,'/'+target+'/manifest.json'));if(manifest.header?.uuid!==pack.uuid)fail('verification_failed');}
-  const files=await listing(client,'/plugins');if(!files.some(f=>f.name===WHEEL&&f.size===source.wheel.length))fail('verification_failed');
+  await progress('addon');const files=await listing(client,'/plugins');if(!files.some(f=>f.name===WHEEL&&f.size===source.wheel.length))fail('verification_failed');
   const uploaded=await client.call('files_read_base64',{path:'/plugins/'+WHEEL});if(typeof uploaded.content_base64!=='string'||createHash('sha256').update(Buffer.from(uploaded.content_base64,'base64')).digest('hex')!==createHash('sha256').update(source.wheel).digest('hex'))fail('verification_failed');
   const confirmed=await read(client,configPath);const edit=configEdit(confirmed,body.voicePort);if(edit.old_string!==edit.new_string)fail('verification_failed');
-  stage='restart';const beforePower=await client.call('server_overview');if(beforePower.info?.id!==plan.server.id||!['running','offline'].includes(beforePower.runtime?.current_state))fail('server_running');const action=beforePower.runtime.current_state==='running'?'restart':'start';const previousUptime=beforePower.runtime.resources?.uptime;await client.call('power_action',{action});
+  await progress('plugin');stage='restart';const beforePower=await client.call('server_overview');if(beforePower.info?.id!==plan.server.id||!['running','offline'].includes(beforePower.runtime?.current_state))fail('server_running');const action=beforePower.runtime.current_state==='running'?'restart':'start';const previousUptime=beforePower.runtime.resources?.uptime;await client.call('power_action',{action});
   return {installed:true,started:true,powerAction:action,previousUptime:Number.isFinite(previousUptime)?previousUptime:null,server:{id:plan.server.id,name:plan.server.name,host:plan.server.host},world:plan.world,voicePort:body.voicePort,backup:backups[0]||null,backups,pluginVersion:'0.5.5',addonVersion:'2.15.39'};
  }catch(error){if(!(error instanceof MCSVError))error=new MCSVError('install_failed');error.stage=stage;error.partial=mutated;throw error;}finally{active.delete(plan.server.id);}
 }
