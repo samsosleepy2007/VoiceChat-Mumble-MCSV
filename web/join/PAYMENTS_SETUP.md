@@ -1,5 +1,7 @@
 # Payments setup (not yet enabled in production)
 
+Agreed one-time installation price: **249 THB per server** (`INSTALL_PRICE_SATANG=24900`). Receiving PromptPay and TrueMoney numbers have been configured privately in Vercel Production. PostgreSQL, SlipOK credentials and the receiver display name are still required before rollout.
+
 After MCSV confirms Minecraft Bedrock + Endstone and installation permissions, the installer can display a payment page instead of the port selector. Verified payment unlocks port selection, installation, automatic restart and Join. This is a one-time entitlement for the signed-in Discord user and the MCSV server ID; reinstalling that server with the same account does not charge again. Other servers need their own payment. No credits or monthly renewal are implemented.
 
 ## Required configuration
