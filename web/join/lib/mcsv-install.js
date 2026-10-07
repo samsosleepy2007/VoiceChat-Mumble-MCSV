@@ -103,7 +103,7 @@ export async function fetchArtifacts(request,release){
 }
 export function packArchive(source,targets){
  const files={};for(const pack of PACKS){const target=targets[pack.type]||pack.type+'_packs/'+pack.folder;if(typeof target!=='string'||target.length>512||target.split('/').some(p=>!validName(p)))fail('unsafe_layout');for(const [name,data] of Object.entries(source.packs[pack.type]))files[target+'/'+name]=data;}
- return Buffer.from(zipSync(files,{level:6}));
+ return Buffer.from(zipSync(files,{level:6,mtime:new Date('2020-01-01T00:00:00Z')}));
 }
 async function transfer(client,source,path,bytes,targets){
  if(!source.transferOrigin){await client.call('files_upload_base64',{path,content_base64:bytes.toString('base64')});return;}
