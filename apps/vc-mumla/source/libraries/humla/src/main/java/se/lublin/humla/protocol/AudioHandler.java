@@ -124,12 +124,15 @@ public class AudioHandler extends HumlaNetworkListener implements AudioInput.Aud
         mEncoderLock = new Object();
 
         int actualSource = audioSource;
-        int actualStream = audioStream;
+        // Modern communication routing, including Bluetooth SCO, requires a voice stream.
+        int actualStream = android.os.Build.VERSION.SDK_INT >= 31 || bluetoothEnabled
+                ? AudioManager.STREAM_VOICE_CALL : audioStream;
+        // Routing belongs to the voice session even if hardware AEC is unavailable/disabled.
+        mVcPreviousAudioMode = mAudioManager.getMode();
+        mAudioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
+        mVcCommunicationModeActive = true;
         if (echoCancellationMethod.equals("system") /* android.media.audiofx.AcousticEchoCanceler */) {
             // Android's system AEC expects a communication capture context.
-            mVcPreviousAudioMode = mAudioManager.getMode();
-            mAudioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
-            mVcCommunicationModeActive = true;
             actualSource = MediaRecorder.AudioSource.VOICE_COMMUNICATION;
             Log.i(TAG, "VC-AEC audioMode=MODE_IN_COMMUNICATION"
                     + " previousMode=" + mVcPreviousAudioMode
@@ -139,12 +142,10 @@ public class AudioHandler extends HumlaNetworkListener implements AudioInput.Aud
         mAudioSource = actualSource;
         mAudioStream = actualStream;
 
-        // AEC communication mode can otherwise default to the quiet earpiece.
-        // Handset mode and the existing Bluetooth SCO handler keep their own routing.
-        if (mVcCommunicationModeActive && mAudioStream == AudioManager.STREAM_MUSIC && !mBluetoothOn) {
-            mVcSpeakerRoute = new SpeakerAudioRoute(mAudioManager);
-            mVcSpeakerRoute.start();
-        }
+        mVcSpeakerRoute = new SpeakerAudioRoute(mAudioManager);
+        mVcSpeakerRoute.setPolicy(context.getSharedPreferences(context.getPackageName() + "_preferences", 0)
+                .getString(SpeakerAudioRoute.PREF_OUTPUT, "auto"));
+        mVcSpeakerRoute.start();
 
         try {
             mInput = new AudioInput(this, mAudioSource, mSampleRate, mEchoCancellationMethod);
@@ -153,6 +154,7 @@ public class AudioHandler extends HumlaNetworkListener implements AudioInput.Aud
             throw error;
         }
         mOutput = new AudioOutput(mOutputListener);
+        mOutput.setRoute(mVcSpeakerRoute);
     }
 
     /**
@@ -451,7 +453,7 @@ public class AudioHandler extends HumlaNetworkListener implements AudioInput.Aud
     @Override
     public void onAudioInputReceived(short[] frame, int frameSize) {
         boolean talking = mInputMode.shouldTransmit(frame, frameSize);
-        talking &= !mMuted;
+        talking &= !mMuted && !mOutput.isAudioTestPlaying() && android.os.SystemClock.elapsedRealtime() >= mLocalTestMuteUntil;
 
         if (mTalking ^ talking) {
             mEncodeListener.onTalkingStateChanged(talking);
@@ -512,6 +514,24 @@ public class AudioHandler extends HumlaNetworkListener implements AudioInput.Aud
         }
     }
 
+    private volatile long mLocalTestMuteUntil;
+    public void setAudioOutputPolicy(String policy) { mVcSpeakerRoute.setPolicy(policy); }
+    public android.media.AudioDeviceInfo[] getAudioOutputDevices() { return mVcSpeakerRoute.getDevices(); }
+    public android.media.AudioDeviceInfo getRoutedAudioDevice() { return mOutput.getRoutedDevice(); }
+    public String getAudioRouteStatus() { return mVcSpeakerRoute.getStatus(); }
+    public boolean startAudioTest() {
+        // Also block microphone transmission so the speaker test cannot leak back via capture.
+        mLocalTestMuteUntil = android.os.SystemClock.elapsedRealtime() + 3500;
+        boolean started = mOutput.startAudioTest();
+        if (!started) mLocalTestMuteUntil = 0;
+        return started;
+    }
+    public void stopAudioTest() {
+        mOutput.stopAudioTest();
+        mLocalTestMuteUntil = android.os.SystemClock.elapsedRealtime() + 500;
+    }
+    public boolean isAudioTestPlaying() { return mOutput.isAudioTestPlaying(); }
+
     public void setVoiceTargetId(byte id) {
         mTargetId = id;
     }
@@ -542,7 +562,8 @@ public class AudioHandler extends HumlaNetworkListener implements AudioInput.Aud
         ds.rewind();
 
         byte[] packet = ds.dataBlock(length);
-        mEncodeListener.onAudioEncoded(packet, length);
+        if (!mOutput.isAudioTestPlaying() && android.os.SystemClock.elapsedRealtime() >= mLocalTestMuteUntil)
+            mEncodeListener.onAudioEncoded(packet, length);
     }
 
     public interface AudioEncodeListener {

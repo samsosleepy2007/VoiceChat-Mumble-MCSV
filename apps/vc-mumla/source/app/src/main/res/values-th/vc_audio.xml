@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="vc_audio_output">อุปกรณ์เสียงสนทนา</string>
+    <string name="vc_audio_actual">เสียงกำลังออกที่</string>
+    <string name="vc_audio_test">ทดสอบเสียง</string>
+    <string name="vc_audio_stop">หยุดทดสอบเสียง</string>
+    <string name="vc_audio_test_summary">เล่นเสียงทดสอบ 3 วินาทีผ่านทางเดียวกับเสียงสนทนา ระงับการส่งไมค์ชั่วคราวขณะทดสอบ</string>
+    <string name="vc_audio_auto">อัตโนมัติ (หูฟังถ้าเชื่อมต่อ มิฉะนั้นลำโพงหลัก)</string>
+    <string name="vc_audio_speaker">ลำโพงหลัก</string>
+    <string name="vc_audio_earpiece">ลำโพงแนบหู</string>
+    <string name="vc_audio_headphones">หูฟัง</string>
+    <string name="vc_audio_unavailable">อุปกรณ์ที่เลือกไม่เชื่อมต่อ (ใช้อัตโนมัติชั่วคราว)</string>
+    <string name="vc_audio_connect_first">เชื่อมต่อเซิร์ฟเวอร์เสียงก่อนเพื่อทดสอบเส้นทางเสียงจริง</string>
+    <string name="vc_audio_unknown">ยังตรวจสอบเส้นทางเสียงไม่ได้ กดทดสอบเสียงเพื่อตรวจสอบ</string>
+</resources>

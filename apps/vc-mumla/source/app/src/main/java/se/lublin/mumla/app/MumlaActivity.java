@@ -371,8 +371,7 @@ public class MumlaActivity extends AppCompatActivity implements ListView.OnItemC
 
         if (savedInstanceState == null) handleVcJoinIntent(getIntent());
 
-        setVolumeControlStream(mSettings.isHandsetMode() ?
-                AudioManager.STREAM_VOICE_CALL : AudioManager.STREAM_MUSIC);
+        setVolumeControlStream(mSettings.getVoiceAudioStream());
 
         if (savedInstanceState == null) {
             // Got no instance bundle: this is run only on real app startup -- not when Android
@@ -932,7 +931,7 @@ public class MumlaActivity extends AppCompatActivity implements ListView.OnItemC
                 setStayAwake(mSettings.shouldStayAwake());
                 break;
             case Settings.PREF_HANDSET_MODE:
-                setVolumeControlStream(mSettings.isHandsetMode() ? AudioManager.STREAM_VOICE_CALL : AudioManager.STREAM_MUSIC);
+                setVolumeControlStream(mSettings.getVoiceAudioStream());
                 break;
         }
     }

@@ -35,6 +35,14 @@ import se.lublin.humla.util.IHumlaObserver;
  * will throw IllegalStateException if disconnected or not synchronized.
  */
 public interface IHumlaService {
+    int getAudioOutputStream();
+    void setAudioOutputPolicy(String policy);
+    android.media.AudioDeviceInfo[] getAudioOutputDevices();
+    android.media.AudioDeviceInfo getRoutedAudioDevice();
+    String getAudioRouteStatus();
+    boolean startAudioTest();
+    void stopAudioTest();
+    boolean isAudioTestPlaying();
     void registerObserver(IHumlaObserver observer);
 
     void unregisterObserver(IHumlaObserver observer);

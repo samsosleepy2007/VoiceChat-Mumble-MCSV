@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="vc_audio_output">Voice output</string>
+    <string name="vc_audio_actual">Audio is playing through</string>
+    <string name="vc_audio_test">Test voice output</string>
+    <string name="vc_audio_stop">Stop audio test</string>
+    <string name="vc_audio_test_summary">Play a 3-second local test on the voice track. Microphone transmission pauses during the test.</string>
+    <string name="vc_audio_auto">Automatic (headphones, otherwise main speaker)</string>
+    <string name="vc_audio_speaker">Main speaker</string>
+    <string name="vc_audio_earpiece">Earpiece</string>
+    <string name="vc_audio_headphones">Headphones</string>
+    <string name="vc_audio_unavailable">Saved device disconnected (using automatic)</string>
+    <string name="vc_audio_connect_first">Connect to a voice server to test the live output.</string>
+    <string name="vc_audio_unknown">No active audio route reported. Play the test to check.</string>
+</resources>

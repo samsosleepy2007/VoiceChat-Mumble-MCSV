@@ -4,6 +4,19 @@ import static java.util.Objects.requireNonNull;
 import static se.lublin.mumla.Settings.DEFAULT_ECHO_CANCELLATION_METHOD;
 import static se.lublin.mumla.Settings.PREF_ECHO_CANCELLATION_METHOD;
 
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.Intent;
+import android.content.ServiceConnection;
+import android.media.AudioDeviceInfo;
+import android.os.Build;
+import android.os.Handler;
+import android.os.IBinder;
+import android.os.Looper;
+import androidx.preference.Preference;
+import se.lublin.humla.HumlaService;
+import se.lublin.humla.IHumlaService;
+import se.lublin.mumla.service.MumlaService;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.audiofx.AcousticEchoCanceler;
@@ -23,7 +36,25 @@ import se.lublin.mumla.Settings;
 public class AudioSettingsFragment extends MumlaPreferenceFragment {
     @Override
     public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
+        Settings.getInstance(requireContext());
         setPreferencesFromResource(R.xml.settings_audio, rootKey);
+        outputPreference = findPreference("vc_audio_output");
+        actualPreference = findPreference("vc_audio_actual");
+        testPreference = findPreference("vc_audio_test");
+        outputPreference.setSummaryProvider(ListPreference.SimpleSummaryProvider.getInstance());
+        outputPreference.setOnPreferenceChangeListener((preference, value) -> {
+            if (service != null) service.setAudioOutputPolicy((String) value);
+            return true;
+        });
+        testPreference.setOnPreferenceClickListener(preference -> {
+            if (service != null) {
+                if (service.isAudioTestPlaying()) service.stopAudioTest();
+                else service.startAudioTest();
+            }
+            refreshAudio();
+            return true;
+        });
+        refreshAudio();
 
         ListPreference inputPreference = getPreferenceScreen().findPreference(Settings.PREF_INPUT_METHOD);
         requireNonNull(inputPreference).setOnPreferenceChangeListener((preference, newValue) -> {
@@ -55,6 +86,92 @@ public class AudioSettingsFragment extends MumlaPreferenceFragment {
         }
 
         updateAudioDependents(getPreferenceScreen(), inputPreference.getValue());
+    }
+
+    private ListPreference outputPreference;
+    private Preference actualPreference, testPreference;
+    private IHumlaService service;
+    private boolean bound;
+    private final Handler audioUiHandler = new Handler(Looper.getMainLooper());
+    private final Runnable audioRefresh = new Runnable() {
+        @Override public void run() {
+            refreshAudio();
+            audioUiHandler.postDelayed(this, 500);
+        }
+    };
+    private final ServiceConnection audioConnection = new ServiceConnection() {
+        @Override public void onServiceConnected(ComponentName name, IBinder binder) {
+            service = ((MumlaService.MumlaBinder) binder).getService();
+            refreshAudio();
+        }
+        @Override public void onServiceDisconnected(ComponentName name) {
+            service = null;
+            refreshAudio();
+        }
+    };
+
+    @Override public void onStart() {
+        super.onStart();
+        bound = requireContext().bindService(new Intent(requireContext(), MumlaService.class),
+                audioConnection, Context.BIND_AUTO_CREATE);
+        audioUiHandler.post(audioRefresh);
+        requireActivity().setVolumeControlStream(Settings.getInstance(requireContext()).getVoiceAudioStream());
+    }
+
+    @Override public void onStop() {
+        audioUiHandler.removeCallbacksAndMessages(null);
+        if (service != null) service.stopAudioTest();
+        if (bound) requireContext().unbindService(audioConnection);
+        bound = false;
+        service = null;
+        super.onStop();
+    }
+
+    private String deviceName(AudioDeviceInfo device) {
+        switch (device.getType()) {
+            case AudioDeviceInfo.TYPE_BUILTIN_SPEAKER: return getString(R.string.vc_audio_speaker);
+            case AudioDeviceInfo.TYPE_BUILTIN_EARPIECE: return getString(R.string.vc_audio_earpiece);
+            case AudioDeviceInfo.TYPE_BLUETOOTH_SCO:
+            case AudioDeviceInfo.TYPE_BLUETOOTH_A2DP:
+            case AudioDeviceInfo.TYPE_BLE_HEADSET:
+            case AudioDeviceInfo.TYPE_BLE_SPEAKER:
+            case AudioDeviceInfo.TYPE_HEARING_AID: return "Bluetooth: " + device.getProductName();
+            case AudioDeviceInfo.TYPE_WIRED_HEADSET:
+            case AudioDeviceInfo.TYPE_WIRED_HEADPHONES:
+            case AudioDeviceInfo.TYPE_USB_HEADSET:
+            case AudioDeviceInfo.TYPE_USB_DEVICE: return getString(R.string.vc_audio_headphones) + ": " + device.getProductName();
+            default: return device.getProductName().toString();
+        }
+    }
+
+    private void refreshAudio() {
+        if (!isAdded() || outputPreference == null) return;
+        boolean connected = service != null && service.isConnected();
+        if (connected) requireActivity().setVolumeControlStream(service.getAudioOutputStream());
+        List<CharSequence> names = new ArrayList<>();
+        List<CharSequence> values = new ArrayList<>();
+        names.add(getString(R.string.vc_audio_auto)); values.add("auto");
+        names.add(getString(R.string.vc_audio_speaker)); values.add(Integer.toString(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER));
+        if (connected && Build.VERSION.SDK_INT >= 23) {
+            for (AudioDeviceInfo device : service.getAudioOutputDevices()) {
+                String value = Integer.toString(device.getType());
+                if (!values.contains(value)) { names.add(deviceName(device)); values.add(value); }
+            }
+        }
+        String saved = outputPreference.getValue();
+        if (saved != null && !values.contains(saved)) {
+            names.add(getString(R.string.vc_audio_unavailable)); values.add(saved);
+        }
+        outputPreference.setEntries(names.toArray(new CharSequence[0]));
+        outputPreference.setEntryValues(values.toArray(new CharSequence[0]));
+        testPreference.setEnabled(connected);
+        boolean playing = connected && service.isAudioTestPlaying();
+        testPreference.setTitle(playing ? R.string.vc_audio_stop : R.string.vc_audio_test);
+        testPreference.setSummary(connected ? R.string.vc_audio_test_summary : R.string.vc_audio_connect_first);
+        AudioDeviceInfo actual = connected && Build.VERSION.SDK_INT >= 23 ? service.getRoutedAudioDevice() : null;
+        actualPreference.setSummary(!connected ? getString(R.string.vc_audio_connect_first)
+                : actual == null ? getString(R.string.vc_audio_unknown) : deviceName(actual));
+        actualPreference.setSelectable(false);
     }
 
     private void removeListEntry(ListPreference pref, String valueToRemove) {

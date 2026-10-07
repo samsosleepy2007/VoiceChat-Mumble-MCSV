@@ -175,6 +175,11 @@ public class Settings {
 
     private Settings(Context ctx) {
         preferences = PreferenceManager.getDefaultSharedPreferences(ctx);
+        if (!preferences.getBoolean("vc_audio_route_migrated_v064", false)) {
+            // Replace stale handset mode with the new explicit output selector once per install.
+            preferences.edit().putBoolean("vc_audio_route_migrated_v064", true)
+                    .putBoolean(PREF_HANDSET_MODE, false).putString("vc_audio_output", "auto").apply();
+        }
         if (!preferences.getBoolean(PREF_VC_AEC_MIGRATED, false)) {
             SharedPreferences.Editor editor = preferences.edit()
                     .putBoolean(PREF_VC_AEC_MIGRATED, true);
@@ -358,6 +363,11 @@ public class Settings {
 
     public boolean isHalfDuplex() {
         return preferences.getBoolean(PREF_HALF_DUPLEX, DEFAULT_HALF_DUPLEX);
+    }
+
+    public int getVoiceAudioStream() {
+        return android.os.Build.VERSION.SDK_INT >= 31 || isHandsetMode()
+                ? android.media.AudioManager.STREAM_VOICE_CALL : android.media.AudioManager.STREAM_MUSIC;
     }
 
     public boolean isHandsetMode() {

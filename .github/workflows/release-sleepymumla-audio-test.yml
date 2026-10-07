@@ -1,0 +1,53 @@
+name: SleepyMumla v0.6.4 audio routing and local test
+on:
+  push:
+    branches: [sleepymumla-audio-test]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Install Android toolchain
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" "ndk;25.1.8937393"'
+      - name: Build crypto libraries
+        working-directory: apps/vc-mumla/source/libraries/humla/libs/humla-spongycastle
+        run: |
+          chmod +x ../../gradlew
+          ../../gradlew jar --no-daemon
+      - name: Run regression tests and build APK
+        working-directory: apps/vc-mumla/source
+        run: |
+          python3 - <<'PYBUILD'
+          from pathlib import Path
+          p = Path('app/build.gradle')
+          p.write_text(p.read_text().replace('applicationId "se.lublin.mumla.beta"', 'applicationId "se.lublin.mumla.webjoin"').replace('versionName gitDescribe', 'versionName "0.6.4"'))
+          PYBUILD
+          chmod +x gradlew
+          ./gradlew :libraries:humla:testDebugUnitTest :app:testBetaDebugUnitTest :app:assembleBetaDebug --no-daemon --stacktrace
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          cp app/build/outputs/apk/beta/debug/*.apk "$GITHUB_WORKSPACE/out/SleepyMumla-v0.6.4.apk"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$GITHUB_WORKSPACE/out/SleepyMumla-v0.6.4.apk" | tee "$GITHUB_WORKSPACE/out/APK-signature.txt"
+          (cd "$GITHUB_WORKSPACE/out" && sha256sum *.apk > SHA256SUMS-v0.6.4.txt)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: SleepyMumla-v0.6.4
+          path: |
+            out/*
+            apps/vc-mumla/source/libraries/humla/build/test-results/**/*.xml
+            apps/vc-mumla/source/app/build/test-results/**/*.xml
+      - name: Publish APK for device testing
+        if: contains(github.event.head_commit.message, '[release-sleepymumla-v0.6.4]')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create sleepymumla-v0.6.4 out/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title 'SleepyMumla v0.6.4 — Voice output selector and audio test' --notes 'Device-test build: explicit output selection, main speaker default with external headset support, actual AudioTrack routing display, bounded route correction, and a local 3-second voice-track test with microphone transmission paused. System echo cancellation remains available. This release contains the Android APK only. Physical speaker, Bluetooth, screen-off and Minecraft checks still require a real device.' --prerelease

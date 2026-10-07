@@ -686,6 +686,7 @@ public class HumlaService extends Service implements IHumlaService, IHumlaSessio
 
     @Override
     public void onBluetoothScoConnected() {
+        if (android.os.Build.VERSION.SDK_INT >= 31) return;
         // After an SCO connection is established, audio is rerouted to be compatible with SCO.
         mAudioBuilder.setBluetoothEnabled(true);
         if (mAudioHandler != null) {
@@ -699,6 +700,7 @@ public class HumlaService extends Service implements IHumlaService, IHumlaSessio
 
     @Override
     public void onBluetoothScoDisconnected() {
+        if (android.os.Build.VERSION.SDK_INT >= 31) return;
         // Restore audio settings after disconnection.
         mAudioBuilder.setBluetoothEnabled(false);
         if (mAudioHandler != null) {
@@ -1259,6 +1261,31 @@ public class HumlaService extends Service implements IHumlaService, IHumlaSessio
          * @see #cancelReconnect()
          */
         CONNECTION_LOST
+    }
+
+    @Override public int getAudioOutputStream() {
+        return mAudioHandler == null ? AudioManager.STREAM_MUSIC : mAudioHandler.getAudioStream();
+    }
+    @Override public void setAudioOutputPolicy(String policy) {
+        if (mAudioHandler != null) mAudioHandler.setAudioOutputPolicy(policy);
+    }
+    @Override public android.media.AudioDeviceInfo[] getAudioOutputDevices() {
+        return mAudioHandler == null ? new android.media.AudioDeviceInfo[0] : mAudioHandler.getAudioOutputDevices();
+    }
+    @Override public android.media.AudioDeviceInfo getRoutedAudioDevice() {
+        return mAudioHandler == null ? null : mAudioHandler.getRoutedAudioDevice();
+    }
+    @Override public String getAudioRouteStatus() {
+        return mAudioHandler == null ? "Disconnected" : mAudioHandler.getAudioRouteStatus();
+    }
+    @Override public boolean startAudioTest() {
+        return mAudioHandler != null && mAudioHandler.isInitialized() && mAudioHandler.startAudioTest();
+    }
+    @Override public void stopAudioTest() {
+        if (mAudioHandler != null) mAudioHandler.stopAudioTest();
+    }
+    @Override public boolean isAudioTestPlaying() {
+        return mAudioHandler != null && mAudioHandler.isAudioTestPlaying();
     }
 
     public static class HumlaBinder extends Binder {
