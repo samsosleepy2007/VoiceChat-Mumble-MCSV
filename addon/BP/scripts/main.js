@@ -1428,6 +1428,40 @@ async function showBankTransfer(player, number, authorize) {
   } catch (e) { player.sendMessage("§b[ SleepyBank ]§r §c ไม่สามารถเปิดหน้าโอนเงินได้ กรุณาลองใหม่"); console.warn(`[SleepyBank] UI_FAILED: ${e}`); }
   finally { bankTransferPlayers.delete(player.id); }
 }
+// ATM uses the PIN configured on the phone linked to this account.
+function atmAccessValid(player, account, authorization) {
+  if (canEditPhoneIc(player, account.phoneId)) return true;
+  const lock = readPhoneLock(account.phoneId);
+  return !!lock && authorization?.phoneId === account.phoneId && authorization?.pin === lock.pin && authorization?.owner === lock.owner;
+}
+async function unlockAtm(player, account) {
+  if (canEditPhoneIc(player, account.phoneId)) return { phoneId: account.phoneId };
+  if (!readPhoneLock(account.phoneId)) {
+    player.sendMessage("§b[ SleepyATM ]§r เจ้าของบัญชียังไม่ได้ตั้งรหัสใน SleepyPhone จึงไม่อนุญาตให้ผู้อื่นใช้บัตร");
+    return undefined;
+  }
+  const input = new ObservableString("", { clientWritable: true });
+  const status = new ObservableString("");
+  let authorization, failures = 0;
+  const form = new CustomForm(player, "SleepyATM — รหัสบัตร")
+    .label("กรอกรหัส 4 หลักที่เจ้าของบัญชีตั้งไว้ใน SleepyPhone")
+    .textField("รหัสบัตร", input).label(status)
+    .button("ยืนยันรหัส", () => {
+      const current = atmAccountFromCard(player);
+      if (current.error || current.account.number !== account.number || current.account.phoneId !== account.phoneId) {
+        status.setData("กรุณาถือบัตรบัญชีเดิม"); form.close(); return;
+      }
+      const lock = readPhoneLock(account.phoneId);
+      if (lock && /^\d{4}$/.test(String(input.getData())) && input.getData() === lock.pin) {
+        authorization = { phoneId: account.phoneId, pin: lock.pin, owner: lock.owner };
+        form.close(); return;
+      }
+      input.setData(""); status.setData("รหัสบัตรไม่ถูกต้อง");
+      if (++failures >= 5) form.close();
+    }).closeButton();
+  await form.show();
+  return authorization;
+}
 async function openAtm(player) {
   if (!player || openAtmPlayers.has(player.id)) return;
   const access = atmAccountFromCard(player);
@@ -1436,6 +1470,8 @@ async function openAtm(player) {
   openAtmPlayers.add(player.id);
   let page = "home";
   try {
+    const authorization = await unlockAtm(player, access.account);
+    if (!authorization) return;
     while (page) {
       let nextPage = "";
       const status = new ObservableString("");
@@ -1445,6 +1481,7 @@ async function openAtm(player) {
       const currentAccount = () => {
         const current = atmAccountFromCard(player);
         if (current.error || current.account.number !== number) throw new Error("กรุณาถือบัตรบัญชีเดิมที่ใช้เปิด ATM");
+        if (!atmAccessValid(player, current.account, authorization)) throw new Error("สิทธิ์ใช้บัตรหมดอายุ กรุณาเปิด ATM และใส่รหัสใหม่");
         return current.account;
       };
       let job;
@@ -3582,7 +3619,7 @@ system.runInterval(() => {
 }, 100);
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.15.39 — close ATM after successful transactions"
+  "[VCMumbleItem/BP] Loaded v2.15.40 — ATM linked-phone PIN protection"
 );
 
 // Verify real item registration and per-item metadata without giving test items.

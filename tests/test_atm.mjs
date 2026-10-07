@@ -14,6 +14,7 @@ class Form {
 const player={id:'a',messages:[],sendMessage(m){this.messages.push(m.replace(/§./g,""));}};
 const ctx=vm.createContext({
  BANK_CARD_IDS:{black:'custom:blackcard',white:'custom:whitecard'},BANK_CARD_ACCOUNT:'sleepybank:account',BANK_ACCOUNT_PREFIX:'sleepybank:account:',
+ canEditPhoneIc:()=>true,readPhoneLock:()=>undefined,
  EquipmentSlot:{Mainhand:'main'},equippable:()=>({getEquipment:()=>held}),
  world:{getDynamicProperty:()=>JSON.stringify(account)},CustomForm:Form,ObservableString:Obs,console,
 });
@@ -23,7 +24,7 @@ assert.equal(player.messages.at(-1),'[ SleepyATM ] กรุณาถือบ�
 held={typeId:'minecraft:stick'};await ctx.openAtm(player);assert.equal(form,undefined);
 held={typeId:'custom:blackcard',getDynamicProperty:()=>undefined};await ctx.openAtm(player);
 assert.match(player.messages.at(-1),/ยังไม่ได้ลงทะเบียน/);
-held.getDynamicProperty=()=> '123';const pending=ctx.openAtm(player);
+held.getDynamicProperty=()=> '123';const pending=ctx.openAtm(player);await Promise.resolve();
 assert.match(form.labels[0],/เลขบัญชี: 123/);assert.match(form.labels[0],/จำนวนเงินที่มีทั้งหมด: 250/);
 assert.match(form.labels[0],/รายรับ: 400/);assert.match(form.labels[0],/รายจ่าย: 150/);
 assert.deepEqual(form.buttons.map(b=>b.label),['ฝากเงิน','ถอนเงิน','โอนเงิน','ประวัติการโอน']);
@@ -31,7 +32,7 @@ for(const b of form.buttons.slice(4))b.action();assert.equal(account.balance,250
 const first=form;await ctx.openAtm(player);assert.equal(first,form);
 finish();await pending;
 held={typeId:'custom:whitecard',getDynamicProperty:()=> '123'};
-const again=ctx.openAtm(player);assert.notEqual(first,form);finish();await again;
+const again=ctx.openAtm(player);await Promise.resolve();assert.notEqual(first,form);finish();await again;
 const block=JSON.parse(fs.readFileSync(new URL('../addon/BP/blocks/modern_atm.block.json',import.meta.url)))['minecraft:block'];
 assert.equal(block.components['minecraft:light_emission'],3);
 assert.ok(block.components['sleepy:atm_interact']);
