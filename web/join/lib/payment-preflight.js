@@ -2,6 +2,7 @@
 import pg from 'pg';
 import { TmnVoucherClient } from '@prakrit_m/tmn-voucher';
 import { paymentConfig } from './payments.js';
+console.log('PAYMENT_CONFIG_CHECK '+JSON.stringify({branchPresent:Boolean(process.env.SLIPOK_BRANCH_ID),branchNumeric:/^\d+$/.test((process.env.SLIPOK_BRANCH_ID||'').trim()),keyPresent:Boolean(process.env.SLIPOK_API_KEY),receiverPresent:Boolean(process.env.PAYMENT_RECEIVER_NAME),promptpayValid:/^(0\d{9}|\d{13}|\d{15})$/.test(process.env.PROMPTPAY_ID||'')}));
 const config=paymentConfig();
 const client=new pg.Client({connectionString:process.env.PAYMENT_DATABASE_URL||process.env.DATABASE_URL,connectionTimeoutMillis:10000});
 try{
