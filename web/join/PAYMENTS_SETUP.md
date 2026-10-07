@@ -1,6 +1,6 @@
-# Payments setup (not yet enabled in production)
+# Payments setup
 
-Agreed one-time installation price: **249 THB per server** (`INSTALL_PRICE_SATANG=24900`). Receiving PromptPay and TrueMoney numbers have been configured privately in Vercel Production. Neon has been connected to Vercel. SlipOK credentials and the receiver display name have also been configured. The three payment tables were initialized and verified against Neon on 2026-10-07 (Vercel setup job `dpl_7Brn2174Fw5Jq1i89RXhvm6Jbfgd`). Live provider checks are still required before rollout.
+Regular agreed installation price: **249 THB per server**. The owner authorized a temporary live test price of **5 THB** (`INSTALL_PRICE_SATANG=500`) on 2026-10-07. Do not restore the regular price automatically. Receiving PromptPay and TrueMoney numbers have been configured privately in Vercel Production. Neon has been connected to Vercel. SlipOK credentials and the receiver display name have also been configured. The three payment tables were initialized and verified against Neon on 2026-10-07 (Vercel setup job `dpl_7Brn2174Fw5Jq1i89RXhvm6Jbfgd`). Live provider checks are still required before rollout.
 
 After MCSV confirms Minecraft Bedrock + Endstone and installation permissions, the installer can display a payment page instead of the port selector. Verified payment unlocks port selection, installation, automatic restart and Join. This is a one-time entitlement for the signed-in Discord user and the MCSV server ID; reinstalling that server with the same account does not charge again. Other servers need their own payment. No credits or monthly renewal are implemented.
 
@@ -51,3 +51,9 @@ node tests/test_web_install.mjs
 ```
 
 Payment tests use embedded PostgreSQL (PGlite), the real SQL schema and mocked providers. They do not redeem live envelopes or consume SlipOK quota. Real network and device/browser testing remains required before collecting money.
+
+## Live test rollout, 2026-10-07
+
+Production checkout is enabled at the owner-authorized 5 THB test price. Database connection and all three tables passed checks. SlipOK quota API authenticated successfully (100 quota at the check). The configured SlipOK branch may be either a numeric ID or its exact SlipOK API URL; the code extracts the ID from that fixed host/path. Internal setup documents are omitted from deployments and their URLs return 404.
+
+TrueMoney direct SDK requests returned HTTP 403 from Vercel. `TRUEMONEY_ENABLED=false` keeps envelopes unavailable until connectivity is fixed and verified. A real PromptPay transfer/slip and a full authenticated MCSV checkout/install have not been performed by the assistant. The owner must complete the real payment test.
