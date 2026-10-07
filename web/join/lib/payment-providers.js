@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { TmnVoucherClient } from '@prakrit_m/tmn-voucher';
+import { trueMoneyClient } from './truemoney-client.js';
 
 export class PaymentError extends Error {
  constructor(code,uncertain=false){super(code);this.code=code;this.uncertain=uncertain;}
@@ -36,12 +36,14 @@ export async function checkSlip(order,image,config,fetcher=fetch){
  // log:true makes SlipOK enforce the receiving account configured for this branch.
  return {reference:'slip:'+d.sendingBank+':'+d.transRef,amount};
 }
-export async function redeemEnvelope(order,code,config,client=new TmnVoucherClient({timeoutMs:15000})){ 
- const preview=await client.verifyVoucher(code,{amount:order.amount_satang});
- if(!preview.success)throw new PaymentError(preview.code==='CONDITION_NOT_MET'?'payment_amount':'voucher_invalid');
+export async function redeemEnvelope(order,code,config,client,transport){
+ if(!client){({client,transport}=trueMoneyClient());}
+ const unavailable=['NETWORK_ERROR','TIMEOUT','INVALID_RESPONSE','INTERNAL_ERROR','MAINTENANCE'];
+ let preview;try{preview=await client.verifyVoucher(code,{amount:order.amount_satang});}catch{throw new PaymentError('voucher_unavailable');}
+ if(!preview.success)throw new PaymentError(unavailable.includes(preview.code)?'voucher_unavailable':preview.code==='CONDITION_NOT_MET'?'payment_amount':'voucher_invalid');
  if(Number(preview.data?.voucher?.member)!==1)throw new PaymentError('voucher_single');
- let result;try{result=await client.redeemVoucher(config.phone,code,{amount:order.amount_satang});}catch{throw new PaymentError('payment_review',true);}
- if(!result.success){const uncertain=['NETWORK_ERROR','TIMEOUT','INVALID_RESPONSE','INTERNAL_ERROR'].includes(result.code);throw new PaymentError(uncertain?'payment_review':'voucher_invalid',uncertain);}
+ let result;try{result=await client.redeemVoucher(config.phone,code,{amount:order.amount_satang});}catch{if(transport?.redeemAttempted===false)throw new PaymentError('voucher_unavailable');throw new PaymentError('payment_review',true);}
+ if(!result.success){const uncertain=unavailable.includes(result.code);if(uncertain&&transport?.redeemAttempted===false)throw new PaymentError('voucher_unavailable');throw new PaymentError(uncertain?'payment_review':'voucher_invalid',uncertain);}
  let received;try{received=satang(result.data?.raw?.my_ticket?.amount_baht);}catch{throw new PaymentError('payment_review',true);}
  if(received!==order.amount_satang||result.data?.amount!==received||result.data?.voucherCode!==code)throw new PaymentError('payment_review',true);
  return {reference:'voucher:'+createHash('sha256').update(code).digest('hex'),amount:result.data.amount};
