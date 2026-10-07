@@ -13,6 +13,7 @@ class Form {
 }
 const player={id:'a',messages:[],sendMessage(m){this.messages.push(m.replace(/§./g,""));}};
 const ctx=vm.createContext({
+ system:{runInterval:()=>1},
  BANK_CARD_IDS:{black:'custom:blackcard',white:'custom:whitecard'},BANK_CARD_ACCOUNT:'sleepybank:account',BANK_ACCOUNT_PREFIX:'sleepybank:account:',
  canEditPhoneIc:()=>true,readPhoneLock:()=>undefined,
  EquipmentSlot:{Mainhand:'main'},equippable:()=>({getEquipment:()=>held}),
