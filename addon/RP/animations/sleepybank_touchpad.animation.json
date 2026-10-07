@@ -1,0 +1,31 @@
+{
+  "format_version": "1.8.0",
+  "animations": {
+    "animation.sleepybank.touchpad_receive": {
+      "animation_length": 0.35,
+      "override_previous_animation": true,
+      "bones": {
+        "rightarm": {
+          "rotation": [
+            "-90 + query.target_x_rotation",
+            0,
+            0
+          ]
+        }
+      },
+      "loop": true
+    },
+    "animation.sleepybank.touchpad_idle": {
+      "animation_length": 0.15,
+      "bones": {
+        "rightarm": {
+          "rotation": [
+            0,
+            0,
+            0
+          ]
+        }
+      }
+    }
+  }
+}

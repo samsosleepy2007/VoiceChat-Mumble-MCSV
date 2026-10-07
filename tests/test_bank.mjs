@@ -9,6 +9,7 @@ class Card {
  getDynamicProperty(k) { return this.properties.get(k); }
 }
 const ctx = vm.createContext({
+ system: {runInterval:()=>1},
  world: { getDynamicProperty: k => saved.get(k), setDynamicProperty: (k, v) => saved.set(k, v) },
  inventory: p => p.inv, ItemStack: Card, Math: Object.assign(Object.create(Math), { random: () => 0 }),
 });

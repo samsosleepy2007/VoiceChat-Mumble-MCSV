@@ -1365,10 +1365,10 @@ async function showBankHistory(player, number, authorize) {
     }
   }
 }
-async function showBankTransfer(player, number, authorize) {
+async function showBankTransfer(player, number, authorize, fixedTarget = "") {
   if (bankTransferPlayers.has(player.id)) return;
   bankTransferPlayers.add(player.id);
-  const destination = new ObservableString("", { clientWritable: true });
+  const destination = new ObservableString(fixedTarget, { clientWritable: !fixedTarget });
   const manual = new ObservableBoolean(false, { clientWritable: true });
   const input = new ObservableString("0", { clientWritable: true });
   const selected = new ObservableNumber(0, { clientWritable: true });
@@ -1407,8 +1407,10 @@ async function showBankTransfer(player, number, authorize) {
           if (/^\d+$/.test(input.getData().trim()) && Number(input.getData()) > balance) input.setData(String(balance));
         };
         refresh();
-        form.header("โอนเงินไปยังบัญชีอื่น").label(info).textField("เลขบัญชีปลายทาง 3 หลัก", destination)
-          .toggle("กรอกจำนวนเงินเอง", manual).slider("จำนวนเงินที่จะโอน", selected, 0, max, { step: 1, visible: sliderVisible })
+        form.header("โอนเงินไปยังบัญชีอื่น").label(info);
+        if (fixedTarget) form.label(`บัญชีปลายทาง: ${fixedTarget}`);
+        else form.textField("เลขบัญชีปลายทาง 3 หลัก", destination);
+        form.toggle("กรอกจำนวนเงินเอง", manual).slider("จำนวนเงินที่จะโอน", selected, 0, max, { step: 1, visible: sliderVisible })
           .textField("จำนวนเงินที่จะโอน", input, { visible: textVisible })
           .button("ถัดไป", () => {
             refresh();
@@ -1428,6 +1430,92 @@ async function showBankTransfer(player, number, authorize) {
   } catch (e) { player.sendMessage("§b[ SleepyBank ]§r §c ไม่สามารถเปิดหน้าโอนเงินได้ กรุณาลองใหม่"); console.warn(`[SleepyBank] UI_FAILED: ${e}`); }
   finally { bankTransferPlayers.delete(player.id); }
 }
+const touchpadReceivers = new Map();
+function stopTouchpad(player, notify = true) {
+  if (!touchpadReceivers.delete(player.id)) return;
+  try { player.playAnimation("animation.sleepybank.touchpad_idle", { controller: "sleepybank_touchpad", blendOutTime: 0.15 }); } catch {}
+  if (notify) player.sendMessage("[ SleepBank ] ทัชแพดรับเงินถูกยกเลิก");
+}
+function touchpadValid(player, receiver) {
+  try { return player.isValid !== false && heldPhoneData(player)?.id === receiver.phoneId && readBankAccount(receiver.phoneId)?.number === receiver.number; } catch { return false; }
+}
+function nearbyTouchpads(player) {
+  return world.getAllPlayers().filter(other => {
+    const receiver = touchpadReceivers.get(other.id);
+    if (other.id === player.id || !receiver || !touchpadValid(other, receiver) || other.dimension.id !== player.dimension.id) return false;
+    const a = player.location, b = other.location;
+    return (a.x-b.x)**2 + (a.y-b.y)**2 + (a.z-b.z)**2 <= 9;
+  }).map(other => ({ player: other, ...touchpadReceivers.get(other.id) }));
+}
+async function showTouchpad(player, account, authorize) {
+  let choice;
+  const menu = new CustomForm(player, "SleepyBank — ทัชแพด")
+    .button("โอนเงิน", () => { choice = "send"; menu.close(); })
+    .button("รับเงิน", () => { choice = "receive"; menu.close(); }).closeButton();
+  await menu.show();
+  if (!choice || !authorize() || heldPhoneData(player)?.id !== account.phoneId) return false;
+  if (choice === "receive") {
+    touchpadReceivers.set(player.id, { phoneId: account.phoneId, number: account.number });
+    try { player.playAnimation("animation.sleepybank.touchpad_receive", { controller: "sleepybank_touchpad", blendOutTime: 0.1, stopExpression: "0" }); } catch {}
+    player.sendMessage("[ SleepyBank ] เปิดทัชแพดรับเงินแล้วกำลังรอเงินเข้า...");
+    return true;
+  }
+  const receivers = nearbyTouchpads(player).filter(r => r.number !== account.number);
+  if (!receivers.length) { player.sendMessage("[ SleepyBank ] ไม่มีผู้เปิดทัชแพดรับเงินในระยะ 3 บล็อก"); return false; }
+  let target = receivers[0];
+  if (receivers.length > 1) {
+    target = undefined;
+    const select = new CustomForm(player, "SleepyBank — เลือกบัญชีรับเงิน");
+    for (const receiver of receivers) select.button(`บัญชี ${receiver.number}`, () => { target = receiver; select.close(); });
+    await select.closeButton().show();
+  }
+  if (!target) return false;
+  const valid = () => authorize() && heldPhoneData(player)?.id === account.phoneId && nearbyTouchpads(player).some(r => r.player.id === target.player.id && r.phoneId === target.phoneId && r.number === target.number);
+  if (!valid()) { player.sendMessage("[ SleepyBank ] ผู้รับยกเลิกหรืออยู่นอกระยะแล้ว"); return false; }
+  await showBankTransfer(player, account.number, valid, target.number);
+  return false;
+}
+system.runInterval(() => {
+  for (const [id, receiver] of touchpadReceivers) {
+    const player = world.getAllPlayers().find(p => p.id === id);
+    if (!player) { touchpadReceivers.delete(id); continue; }
+    if (!touchpadValid(player, receiver)) { stopTouchpad(player); continue; }
+  }
+}, 5);
+// ATM uses the PIN configured on the phone linked to this account.
+function atmAccessValid(player, account, authorization) {
+  if (canEditPhoneIc(player, account.phoneId)) return true;
+  const lock = readPhoneLock(account.phoneId);
+  return !!lock && authorization?.phoneId === account.phoneId && authorization?.pin === lock.pin && authorization?.owner === lock.owner;
+}
+async function unlockAtm(player, account) {
+  if (canEditPhoneIc(player, account.phoneId)) return { phoneId: account.phoneId };
+  if (!readPhoneLock(account.phoneId)) {
+    player.sendMessage("§b[ SleepyATM ]§r เจ้าของบัญชียังไม่ได้ตั้งรหัสใน SleepyPhone จึงไม่อนุญาตให้ผู้อื่นใช้บัตร");
+    return undefined;
+  }
+  const input = new ObservableString("", { clientWritable: true });
+  const status = new ObservableString("");
+  let authorization, failures = 0;
+  const form = new CustomForm(player, "SleepyATM — รหัสบัตร")
+    .label("กรอกรหัส 4 หลักที่เจ้าของบัญชีตั้งไว้ใน SleepyPhone")
+    .textField("รหัสบัตร", input).label(status)
+    .button("ยืนยันรหัส", () => {
+      const current = atmAccountFromCard(player);
+      if (current.error || current.account.number !== account.number || current.account.phoneId !== account.phoneId) {
+        status.setData("กรุณาถือบัตรบัญชีเดิม"); form.close(); return;
+      }
+      const lock = readPhoneLock(account.phoneId);
+      if (lock && /^\d{4}$/.test(String(input.getData())) && input.getData() === lock.pin) {
+        authorization = { phoneId: account.phoneId, pin: lock.pin, owner: lock.owner };
+        form.close(); return;
+      }
+      input.setData(""); status.setData("รหัสบัตรไม่ถูกต้อง");
+      if (++failures >= 5) form.close();
+    }).closeButton();
+  await form.show();
+  return authorization;
+}
 async function openAtm(player) {
   if (!player || openAtmPlayers.has(player.id)) return;
   const access = atmAccountFromCard(player);
@@ -1436,6 +1524,8 @@ async function openAtm(player) {
   openAtmPlayers.add(player.id);
   let page = "home";
   try {
+    const authorization = await unlockAtm(player, access.account);
+    if (!authorization) return;
     while (page) {
       let nextPage = "";
       const status = new ObservableString("");
@@ -1445,6 +1535,7 @@ async function openAtm(player) {
       const currentAccount = () => {
         const current = atmAccountFromCard(player);
         if (current.error || current.account.number !== number) throw new Error("กรุณาถือบัตรบัญชีเดิมที่ใช้เปิด ATM");
+        if (!atmAccessValid(player, current.account, authorization)) throw new Error("สิทธิ์ใช้บัตรหมดอายุ กรุณาเปิด ATM และใส่รหัสใหม่");
         return current.account;
       };
       let job;
@@ -2565,7 +2656,7 @@ async function showPhone(player, requestedAt = Date.now()) {
       .label(bankInfo, { visible: pages.bank })
       .button("โอนเงิน", () => { requestedBank = "transfer"; form.close(); }, { visible: pages.bank })
       .button("ประวัติการโอน", () => { requestedBank = "history"; form.close(); }, { visible: pages.bank })
-      .button("ทัชแพด", () => bankStatus.setData("§7\nระบบทัชแพดเตรียมไว้สำหรับพัฒนาต่อ\n§r"), { visible: pages.bank })
+      .button("ทัชแพด", () => { requestedBank = "touchpad"; form.close(); }, { visible: pages.bank })
       .label(bankStatus, { visible: pages.bank })
       .button("ย้อนกลับ", openHome, { visible: pages.bank })
 
@@ -2726,7 +2817,8 @@ async function showPhone(player, requestedAt = Date.now()) {
         const authorize = () => resolvePhoneProfile(player).profile?.id === profile?.id && readBankAccount(profile?.id)?.number === account?.number;
         await new Promise(resolve => system.run(resolve));
         if (account) {
-          if (mode === "transfer") await showBankTransfer(player, account.number, authorize);
+          if (mode === "touchpad") { if (await showTouchpad(player, account, authorize)) break; }
+          else if (mode === "transfer") await showBankTransfer(player, account.number, authorize);
           else await showBankHistory(player, account.number, authorize);
         }
         if (authorize()) { openBank(); requestedPage = true; }
@@ -3540,6 +3632,7 @@ world.afterEvents.playerSpawn.subscribe((ev) => {
 });
 
 world.afterEvents.playerLeave.subscribe((ev) => {
+  touchpadReceivers.delete(ev.playerId);
   endPhoneCall(phoneCalls.get(playerPhoneCalls.get(ev.playerId)), "ปลายสายออกจากเซิร์ฟเวอร์แล้ว", "error");
   states.delete(ev.playerId);
   const refreshJob = settingsRefreshJobs.get(ev.playerId);
@@ -3582,7 +3675,7 @@ system.runInterval(() => {
 }, 100);
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.15.39 — close ATM after successful transactions"
+  "[VCMumbleItem/BP] Loaded v2.15.43 — explicit touchpad animation hold"
 );
 
 // Verify real item registration and per-item metadata without giving test items.

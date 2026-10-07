@@ -25,7 +25,7 @@ const ctx=vm.createContext({console,Date,ObservableBoolean:Observable,Observable
  readPhoneInbox:()=>[],phoneCallFor:()=>undefined,
  normalizeContactName:s=>s.trim(),phoneChat(){},
  startPhoneCall:(_,own,target,anonymous)=>{dial={target,anonymous};return '';},
- system:{run:f=>f(),runTimeout:f=>f()},
+ system:{run:f=>f(),runTimeout:f=>f(),runInterval:()=>1},
 });
 vm.runInContext(source.slice(source.indexOf('function phoneContactDateTime('),source.indexOf('function readPhoneInbox(')),ctx);
 vm.runInContext(source.slice(source.indexOf('function readPhoneOutgoing('),source.indexOf('function createMessageId(')),ctx);
