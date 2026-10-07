@@ -75,5 +75,11 @@
   ],
   "regions": [
     "sin1"
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/payment-retention",
+      "schedule": "0 18 * * *"
+    }
   ]
 }
