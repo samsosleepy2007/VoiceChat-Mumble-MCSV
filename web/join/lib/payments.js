@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import generatePayload from 'promptpay-qr';
 import QRCode from 'qrcode';
-import { PaymentError,proof,checkSlip,redeemEnvelope } from './payment-providers.js';
+import { PaymentError,proof,checkSlip } from './payment-providers.js';
 
 export { PaymentError };
 export const paymentsEnabled=()=>process.env.PAYMENTS_ENABLED==='true';
@@ -12,10 +12,11 @@ export function paymentConfig(env=process.env){
  const branchInput=(env.SLIPOK_BRANCH_ID||'').trim();
  const branch=/^\d+$/.test(branchInput)?branchInput:/^https:\/\/api\.slipok\.com\/api\/line\/apikey\/(\d+)\/?$/.exec(branchInput)?.[1];
  const key=(env.SLIPOK_API_KEY||'').trim();
- const promptpay=/^(0\d{9}|\d{13}|\d{15})$/.test(env.PROMPTPAY_ID||'')&&Boolean(branch)&&Boolean(key)&&Boolean(env.PAYMENT_RECEIVER_NAME);
- const truemoney=env.TRUEMONEY_ENABLED!=='false'&&/^0\d{9}$/.test(env.TRUEMONEY_PHONE||'');
+ const slipok=Boolean(branch)&&Boolean(key)&&Boolean(env.PAYMENT_RECEIVER_NAME);
+ const promptpay=/^(0\d{9}|\d{13}|\d{15})$/.test(env.PROMPTPAY_ID||'')&&slipok;
+ const truemoney=env.TRUEMONEY_ENABLED==='true'&&/^0\d{9}$/.test(env.TRUEMONEY_PHONE||'')&&slipok;
  if(!promptpay&&!truemoney)throw new PaymentError('payment_unavailable');
- return {amount,promptpay,truemoney,branch,key,phone:env.TRUEMONEY_PHONE,target:env.PROMPTPAY_ID,receiver:env.PAYMENT_RECEIVER_NAME};
+ return {amount,promptpay,truemoney,slipok,branch,key,phone:env.TRUEMONEY_PHONE,target:env.PROMPTPAY_ID,receiver:env.PAYMENT_RECEIVER_NAME};
 }
 let pool;
 function database(){if(!pool)pool=new pg.Pool({connectionString:process.env.PAYMENT_DATABASE_URL||process.env.DATABASE_URL,max:2,connectionTimeoutMillis:5000,idleTimeoutMillis:10000});return pool;}
@@ -43,9 +44,8 @@ export function paymentStore(db=database()){
    const claim=await c.query(`INSERT INTO sleepy_payment_attempts(proof_key,order_id,method) VALUES($1,$2,$3)
     ON CONFLICT(proof_key) DO UPDATE SET status='verifying',error_code=NULL,created_at=now()
     WHERE sleepy_payment_attempts.order_id=EXCLUDED.order_id AND sleepy_payment_attempts.status='rejected'
-    AND ((sleepy_payment_attempts.error_code='slip_delay' AND sleepy_payment_attempts.created_at<now()-interval '10 minutes')
-     OR (sleepy_payment_attempts.method='truemoney' AND sleepy_payment_attempts.error_code='voucher_unavailable' AND sleepy_payment_attempts.created_at<now()-interval '1 minute')) RETURNING proof_key`,[key,id,method]);
-   if(!claim.rowCount){const previous=await c.query('SELECT order_id,status,error_code FROM sleepy_payment_attempts WHERE proof_key=$1',[key]);const a=previous.rows[0];throw new PaymentError(a?.order_id===id&&a.status==='rejected'&&a.error_code==='voucher_unavailable'?'voucher_retry_wait':'payment_duplicate');}
+    AND sleepy_payment_attempts.error_code='slip_delay' AND sleepy_payment_attempts.created_at<now()-interval '10 minutes' RETURNING proof_key`,[key,id,method]);
+   if(!claim.rowCount)throw new PaymentError('payment_duplicate');
    await c.query("UPDATE sleepy_payment_orders SET status='verifying' WHERE id=$1",[id]);await c.query('COMMIT');return o;
   }catch(e){await c.query('ROLLBACK');if(e.code==='23505')throw new PaymentError('payment_duplicate');throw e;}finally{c.release();}
  },
@@ -69,13 +69,13 @@ export async function checkoutPayment(user,server){
  if(await store.entitled(user,server))return {required:true,paid:true};
  const o=await store.checkout(user,server,config.amount);
  if(o.status==='paid')return {required:true,paid:true};
- return {required:true,paid:false,status:o.status,orderId:o.id,amountSatang:o.amount_satang,expiresAt:o.expires_at,methods:{promptpay:config.promptpay,truemoney:config.truemoney},receiver:config.promptpay?config.receiver:null,promptpayId:config.promptpay?config.target:null,qr:config.promptpay?await QRCode.toDataURL(generatePayload(config.target,{amount:o.amount_satang/100}),{width:320,margin:2}):null};
+ return {required:true,paid:false,status:o.status,orderId:o.id,amountSatang:o.amount_satang,expiresAt:o.expires_at,methods:{promptpay:config.promptpay,truemoney:config.truemoney},receiver:config.receiver,truemoneyPhone:config.truemoney?config.phone:null,promptpayId:config.promptpay?config.target:null,qr:config.promptpay?await QRCode.toDataURL(generatePayload(config.target,{amount:o.amount_satang/100}),{width:320,margin:2}):null};
 }
-export async function payOrder(user,body,store=paymentStore(),config=paymentConfig(),providers={checkSlip,redeemEnvelope}){
+export async function payOrder(user,body,store=paymentStore(),config=paymentConfig(),providers={checkSlip}){
  if(!/^[0-9a-f-]{36}$/.test(body.orderId||''))throw new PaymentError('payment_order');
  if(!config[body.method])throw new PaymentError('payment_method');
  const p=proof(body);const o=await store.begin(body.orderId,user,p.key,body.method);if(!o)return {paid:true};
- try{const result=await (body.method==='promptpay'?providers.checkSlip(o,p.value,config):providers.redeemEnvelope(o,p.value,config));await store.finish(o,p.key,result);return {paid:true};}
+ try{const result=await providers.checkSlip(o,p.value,config);await store.finish(o,p.key,result);return {paid:true};}
  catch(e){const error=e instanceof PaymentError?e:new PaymentError('payment_review',true);await store.failed(o.id,p.key,error);throw error;}
 }
 export async function requirePayment(user,server){if(paymentsEnabled()){paymentConfig();if(!await paymentStore().entitled(user,server))throw new PaymentError('payment_required');}}

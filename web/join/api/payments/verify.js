@@ -17,5 +17,5 @@ export default async function handler(req,res){
   let body;try{body=typeof req.body==='string'?JSON.parse(req.body):req.body;}catch{throw new PaymentError('format');}
   if(!body||JSON.stringify(body).length>3000000)throw new PaymentError('slip_format');
   return res.status(200).json(await payOrder(s.user.id,body));
- }catch(error){const code=error instanceof PaymentError?error.code:'payment_unavailable';console.warn(JSON.stringify({event:'payment_verification_failed',reference,code}));return res.status(['payment_unavailable','payment_review','voucher_unavailable'].includes(code)?503:400).json({error:code,reference});}
+ }catch(error){const code=error instanceof PaymentError?error.code:'payment_unavailable';console.warn(JSON.stringify({event:'payment_verification_failed',reference,code}));return res.status(['payment_unavailable','payment_review'].includes(code)?503:400).json({error:code,reference});}
 }
