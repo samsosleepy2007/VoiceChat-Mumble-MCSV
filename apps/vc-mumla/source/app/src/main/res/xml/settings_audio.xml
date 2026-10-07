@@ -28,11 +28,19 @@
         android:title="@string/audioInputMethod"
         app:iconSpaceReserved="false"/>
 
-    <CheckBoxPreference
-        android:key="handset_mode"
-        android:title="@string/handsetMode"
-        android:summary="@string/handsetModeSum"
-        android:defaultValue="false"
+    <ListPreference
+        android:key="vc_audio_output"
+        android:title="@string/vc_audio_output"
+        android:defaultValue="auto"
+        app:iconSpaceReserved="false"/>
+    <Preference
+        android:key="vc_audio_actual"
+        android:title="@string/vc_audio_actual"
+        app:iconSpaceReserved="false"/>
+    <Preference
+        android:key="vc_audio_test"
+        android:title="@string/vc_audio_test"
+        android:summary="@string/vc_audio_test_summary"
         app:iconSpaceReserved="false"/>
 
     <se.lublin.mumla.preference.SeekBarDialogPreference

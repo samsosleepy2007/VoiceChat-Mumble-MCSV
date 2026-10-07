@@ -416,6 +416,9 @@ public class MumlaService extends HumlaService implements
         Bundle changedExtras = new Bundle();
         boolean requiresReconnect = false;
         switch (key) {
+            case "vc_audio_output":
+                setAudioOutputPolicy(sharedPreferences.getString(key, "auto"));
+                return;
             case Settings.PREF_INPUT_METHOD:
                 /* Convert input method defined in settings to an integer format used by Humla. */
                 int inputMethod = mSettings.getHumlaInputMethod();

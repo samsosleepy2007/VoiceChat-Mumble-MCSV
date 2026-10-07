@@ -56,7 +56,9 @@ public class AudioOutput implements Runnable, AudioOutputSpeech.TalkStateListene
     private Thread mThread;
     private final Object mInactiveLock = new Object(); // Lock that the audio thread waits on when there's no audio to play. Wake when we get a frame.
     private final Lock mPacketLock;
-    private boolean mRunning = false;
+    private volatile boolean mRunning = false;
+    private final LocalAudioTest mLocalTest = new LocalAudioTest(AudioHandler.SAMPLE_RATE);
+    private SpeakerAudioRoute mRoute;
     private Handler mMainHandler;
     private AudioOutputListener mListener;
     private final IAudioMixer<float[], short[]> mMixer;
@@ -71,13 +73,28 @@ public class AudioOutput implements Runnable, AudioOutputSpeech.TalkStateListene
         mMixer = new BasicClippingShortMixer();
     }
 
+    public void setRoute(SpeakerAudioRoute route) { mRoute = route; }
+    public synchronized android.media.AudioDeviceInfo getRoutedDevice() {
+        return mRoute == null ? null : mRoute.getRoutedDevice();
+    }
+    public boolean startAudioTest() {
+        if (!mRunning) return false;
+        synchronized (mInactiveLock) {
+            mLocalTest.start();
+            mInactiveLock.notifyAll();
+        }
+        return true;
+    }
+    public void stopAudioTest() { mLocalTest.stop(); }
+    public boolean isAudioTestPlaying() { return mLocalTest.isPlaying(); }
+
     public Thread startPlaying(int audioStream) throws AudioInitializationException {
         if (mThread != null || mRunning)
             return null;
 
         int minBufferSize = AudioTrack.getMinBufferSize(AudioHandler.SAMPLE_RATE,
                 AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT);
-        mBufferSize = Math.min(minBufferSize, AudioHandler.FRAME_SIZE * 12);
+        mBufferSize = Math.max((minBufferSize + 1) / 2, AudioHandler.FRAME_SIZE * 2);
         Log.v(TAG, "Using buffer size " + mBufferSize + ", system's min buffer size: " + minBufferSize);
 
         try {
@@ -85,12 +102,14 @@ public class AudioOutput implements Runnable, AudioOutputSpeech.TalkStateListene
                     AudioHandler.SAMPLE_RATE,
                     AudioFormat.CHANNEL_OUT_MONO,
                     AudioFormat.ENCODING_PCM_16BIT,
-                    mBufferSize,
+                    mBufferSize * 2, // AudioTrack capacity is bytes; the mixer counts PCM16 samples.
                     AudioTrack.MODE_STREAM);
         } catch (IllegalArgumentException e) {
             throw new AudioInitializationException(e);
         }
 
+        if (mRoute != null) mRoute.attach(mAudioTrack);
+        mRunning = true;
         mThread = new Thread(this);
         mThread.start();
         return mThread;
@@ -100,6 +119,7 @@ public class AudioOutput implements Runnable, AudioOutputSpeech.TalkStateListene
         if(!mRunning)
             return;
 
+        mLocalTest.stop();
         mRunning = false;
         synchronized (mInactiveLock) {
             mInactiveLock.notify(); // Wake inactive lock if active
@@ -118,6 +138,7 @@ public class AudioOutput implements Runnable, AudioOutputSpeech.TalkStateListene
         mPacketLock.unlock();
 
         mAudioOutputs.clear();
+        if (mRoute != null) mRoute.close();
         mAudioTrack.release();
         mAudioTrack = null;
     }
@@ -130,8 +151,8 @@ public class AudioOutput implements Runnable, AudioOutputSpeech.TalkStateListene
     public void run() {
         Log.v(TAG, "Started thread.");
         android.os.Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO);
-        mRunning = true;
         mAudioTrack.play();
+        if (mRoute != null) mRoute.onPlaybackStarted();
 
         final short[] mix = new short[mBufferSize];
 
@@ -141,6 +162,7 @@ public class AudioOutput implements Runnable, AudioOutputSpeech.TalkStateListene
             } else {
                 Log.v(TAG, "Pausing thread.");
                 synchronized (mInactiveLock) {
+                    if (!mRunning || mLocalTest.isPlaying() || hasQueuedAudio()) continue;
                     mAudioTrack.flush();
                     mAudioTrack.pause();
 
@@ -150,7 +172,10 @@ public class AudioOutput implements Runnable, AudioOutputSpeech.TalkStateListene
                         e.printStackTrace();
                     }
 
-                    mAudioTrack.play();
+                    if (mRunning) {
+                        mAudioTrack.play();
+                        if (mRoute != null) mRoute.onPlaybackStarted();
+                    }
                 }
                 Log.v(TAG, "Resuming thread.");
             }
@@ -197,11 +222,15 @@ public class AudioOutput implements Runnable, AudioOutputSpeech.TalkStateListene
             mPacketLock.unlock();
         }
 
-        if (sources.size() == 0)
-            return false;
+        if (!sources.isEmpty()) mMixer.mix(sources, buffer, bufferOffset, bufferSize);
+        boolean test = mLocalTest.mix(buffer, bufferOffset, bufferSize);
+        return test || !sources.isEmpty();
+    }
 
-        mMixer.mix(sources, buffer, bufferOffset, bufferSize);
-        return true;
+    private boolean hasQueuedAudio() {
+        mPacketLock.lock();
+        try { return !mAudioOutputs.isEmpty(); }
+        finally { mPacketLock.unlock(); }
     }
 
     public void queueVoiceData(byte[] data, HumlaUDPMessageType messageType) {
