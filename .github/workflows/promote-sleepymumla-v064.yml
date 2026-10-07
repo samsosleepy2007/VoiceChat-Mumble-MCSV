@@ -1,0 +1,37 @@
+name: Promote SleepyMumla v0.6.4 release
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  promote:
+    if: contains(github.event.head_commit.message, '[promote-sleepymumla-v0.6.4]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify tested APK and publish stable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir verified
+          gh release download sleepymumla-v0.6.4 --repo "$GITHUB_REPOSITORY" --pattern SleepyMumla-v0.6.4.apk --dir verified
+          echo '938d6cd9906e56a9b5eb0b7c1f00d7289f5c571b39f053ea6f380fc3a8a6c5e3  verified/SleepyMumla-v0.6.4.apk' | sha256sum --check
+          cat > release-notes.md <<'NOTES'
+          SleepyMumla v0.6.4
+
+          - Main speaker by default when no external headset is connected.
+          - Voice output selection for speaker, wired/USB headsets and supported Bluetooth devices.
+          - Actual AudioTrack output display in Settings.
+          - Local three-second audio test with Stop; microphone transmission pauses during the test.
+          - Bounded route correction after playback starts and on route changes.
+          - Migration of stale handset-mode preferences; system echo cancellation remains available.
+
+          Validation: APK build, signature verification and all 29 unit tests passed in Actions run 37666547987. The APK is identical to the previously published v0.6.4 test build.
+
+          Installation: existing v0.6.4 test installations use the same binary. The signing certificate differs from v0.6.3; back up needed settings before uninstalling v0.6.3 to install this APK.
+
+          Android APK only. Speaker hardware, Bluetooth, screen-off and Minecraft behavior should be checked on the target device.
+          NOTES
+          gh release edit sleepymumla-v0.6.4 --repo "$GITHUB_REPOSITORY" --title 'SleepyMumla v0.6.4 — Voice output selector and audio test' --notes-file release-notes.md --prerelease=false --latest
+          gh release view sleepymumla-v0.6.4 --repo "$GITHUB_REPOSITORY" --json isPrerelease,url
