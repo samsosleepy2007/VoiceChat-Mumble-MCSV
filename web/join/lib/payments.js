@@ -22,11 +22,12 @@ let pool;
 function database(){if(!pool)pool=new pg.Pool({connectionString:process.env.PAYMENT_DATABASE_URL||process.env.DATABASE_URL,max:2,connectionTimeoutMillis:5000,idleTimeoutMillis:10000});return pool;}
 export function paymentStore(db=database()){
  return {
- async entitled(user,server){return Boolean((await db.query('SELECT 1 FROM sleepy_install_entitlements WHERE user_id=$1 AND server_id=$2',[user,server])).rowCount);},
+ async entitled(user,server){return Boolean((await db.query('SELECT 1 FROM sleepy_install_entitlements WHERE user_id=$1 AND server_id=$2 AND installed_at IS NULL',[user,server])).rowCount);},
+ async installed(user,server){await db.query('UPDATE sleepy_install_entitlements SET installed_at=now() WHERE user_id=$1 AND server_id=$2 AND installed_at IS NULL',[user,server]);},
  async checkout(user,server,amount){
   const c=await db.connect();try{
    await c.query('BEGIN');await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[user+':'+server]);
-   if((await c.query('SELECT 1 FROM sleepy_install_entitlements WHERE user_id=$1 AND server_id=$2',[user,server])).rowCount){await c.query('COMMIT');return {status:'paid'};}
+   if((await c.query('SELECT 1 FROM sleepy_install_entitlements WHERE user_id=$1 AND server_id=$2 AND installed_at IS NULL',[user,server])).rowCount){await c.query('COMMIT');return {status:'paid'};}
    await c.query("UPDATE sleepy_payment_orders SET status='expired' WHERE user_id=$1 AND server_id=$2 AND status='pending' AND expires_at<=now()",[user,server]);
    const old=await c.query("SELECT * FROM sleepy_payment_orders WHERE user_id=$1 AND server_id=$2 AND status IN ('pending','verifying','review') ORDER BY created_at DESC LIMIT 1",[user,server]);
    const result=old.rowCount?old:await c.query(`INSERT INTO sleepy_payment_orders(id,user_id,server_id,amount_satang) VALUES($1,$2,$3,$4) RETURNING *`,[randomUUID(),user,server,amount]);await c.query('COMMIT');return result.rows[0];
@@ -54,7 +55,7 @@ export function paymentStore(db=database()){
    await c.query('BEGIN');await c.query('SELECT id FROM sleepy_payment_orders WHERE id=$1 FOR UPDATE',[order.id]);
    await c.query("UPDATE sleepy_payment_attempts SET provider_reference=$2,status='paid',amount_satang=$3 WHERE proof_key=$1",[key,result.reference,result.amount]);
    await c.query("UPDATE sleepy_payment_orders SET status='paid',paid_at=now() WHERE id=$1",[order.id]);
-   await c.query('INSERT INTO sleepy_install_entitlements(user_id,server_id,order_id) VALUES($1,$2,$3) ON CONFLICT(user_id,server_id) DO NOTHING',[order.user_id,order.server_id,order.id]);
+   await c.query('INSERT INTO sleepy_install_entitlements(user_id,server_id,order_id,installed_at) VALUES($1,$2,$3,NULL) ON CONFLICT(user_id,server_id) DO UPDATE SET order_id=EXCLUDED.order_id,installed_at=NULL',[order.user_id,order.server_id,order.id]);
    await c.query('COMMIT');
   }catch(e){await c.query('ROLLBACK');throw new PaymentError('payment_review',true);}finally{c.release();}
  },
@@ -79,3 +80,5 @@ export async function payOrder(user,body,store=paymentStore(),config=paymentConf
  catch(e){const error=e instanceof PaymentError?e:new PaymentError('payment_review',true);await store.failed(o.id,p.key,error);throw error;}
 }
 export async function requirePayment(user,server){if(paymentsEnabled()){paymentConfig();if(!await paymentStore().entitled(user,server))throw new PaymentError('payment_required');}}
+
+export async function consumeInstallation(user,server){if(paymentsEnabled())await paymentStore().installed(user,server);}

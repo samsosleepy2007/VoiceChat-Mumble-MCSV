@@ -23,3 +23,10 @@ const review=await page({...base,payment:{...checkout,status:'review'}});assert(
 const one=await page({...base,payment:{...checkout,methods:{promptpay:false,truemoney:true},qr:null}});assert(one.el('method-promptpay').hidden);assert(!one.el('truemoney-fields').hidden);one.dom.window.close();
 const pp=await page({...base,payment:checkout});Object.defineProperty(pp.el('payment-slip'),'files',{value:[new pp.w.File([new Uint8Array([255,216,255,0])],'bank.jpg',{type:'image/jpeg'})]});pp.el('payment-form').dispatchEvent(new pp.w.Event('submit',{cancelable:true}));await new Promise(r=>setTimeout(r,25));assert(pp.el('install-dialog').open);assert.equal(pp.requests[1].body.method,'promptpay');pp.dom.window.close();
 console.log('PASS payment UI: Endstone check → payment → port, method switching, no premature install, no API-key forwarding, paid/free paths, unsupported/review states');
+
+const latest=await page({...base,installation:{present:true,status:'current',latest:{plugin:'0.5.5',addon:'2.15.39'}},payment:{required:false,reason:'installed'}});
+assert(latest.el('reinstall-dialog').open);assert(!latest.el('install-dialog').open);assert(latest.el('payment-page').hidden);
+latest.el('keep-installed').click();assert(!latest.el('reinstall-dialog').open);assert(!latest.el('install-dialog').open);assert.equal(latest.requests.length,1);
+latest.el('mcsv-form').dispatchEvent(new latest.w.Event('submit',{cancelable:true}));await new Promise(r=>setTimeout(r,5));latest.el('confirm-reinstall').click();assert(latest.el('install-dialog').open);latest.dom.window.close();
+const update=await page({...base,installation:{present:true,status:'update',latest:{plugin:'0.5.5',addon:'2.15.39'}},payment:{required:false,reason:'installed'}});assert(update.el('install-dialog').open);assert(!update.el('reinstall-dialog').open);assert(update.el('payment-page').hidden);update.dom.window.close();
+console.log('PASS installation UI: latest asks to reinstall, cancellation does nothing, old version updates without checkout');

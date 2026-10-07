@@ -16,6 +16,6 @@ CREATE TABLE IF NOT EXISTS sleepy_payment_attempts (
 );
 CREATE TABLE IF NOT EXISTS sleepy_install_entitlements (
  user_id text NOT NULL,server_id text NOT NULL,order_id uuid NOT NULL REFERENCES sleepy_payment_orders(id),
- created_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(user_id,server_id)
+ created_at timestamptz NOT NULL DEFAULT now(),installed_at timestamptz,PRIMARY KEY(user_id,server_id)
 );
 COMMIT;
