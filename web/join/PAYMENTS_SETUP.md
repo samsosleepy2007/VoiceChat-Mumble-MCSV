@@ -1,6 +1,6 @@
 # Payments setup (not yet enabled in production)
 
-Agreed one-time installation price: **249 THB per server** (`INSTALL_PRICE_SATANG=24900`). Receiving PromptPay and TrueMoney numbers have been configured privately in Vercel Production. PostgreSQL, SlipOK credentials and the receiver display name are still required before rollout.
+Agreed one-time installation price: **249 THB per server** (`INSTALL_PRICE_SATANG=24900`). Receiving PromptPay and TrueMoney numbers have been configured privately in Vercel Production. Neon has been connected to Vercel. SlipOK credentials and the receiver display name have also been configured. The three payment tables were initialized and verified against Neon on 2026-10-07 (Vercel setup job `dpl_7Brn2174Fw5Jq1i89RXhvm6Jbfgd`). Live provider checks are still required before rollout.
 
 After MCSV confirms Minecraft Bedrock + Endstone and installation permissions, the installer can display a payment page instead of the port selector. Verified payment unlocks port selection, installation, automatic restart and Join. This is a one-time entitlement for the signed-in Discord user and the MCSV server ID; reinstalling that server with the same account does not charge again. Other servers need their own payment. No credits or monthly renewal are implemented.
 
@@ -11,7 +11,7 @@ Set these privately in Vercel, never in browser JavaScript or GitHub:
 | Variable | Value |
 | --- | --- |
 | `PAYMENTS_ENABLED` | `true` only after migration and a real payment test; absent/false keeps the existing free installer |
-| `PAYMENT_DATABASE_URL` | Private PostgreSQL connection string, preferably pooled and with verified TLS |
+| `PAYMENT_DATABASE_URL` | Optional override for the private PostgreSQL connection string; otherwise the Neon integration’s `DATABASE_URL` is used, preferably pooled with verified TLS |
 | `INSTALL_PRICE_SATANG` | Required agreed price, integer in satang (100 THB = 10000); no default price |
 | `PROMPTPAY_ID` | Receiving PromptPay phone, ID or wallet identifier |
 | `PAYMENT_RECEIVER_NAME` | Name users must check in their banking app before transferring |
