@@ -68,5 +68,8 @@
     {
       "handle": "filesystem"
     }
+  ],
+  "regions": [
+    "sin1"
   ]
 }
