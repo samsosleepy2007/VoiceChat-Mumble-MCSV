@@ -30,7 +30,7 @@
       "continue": true
     },
     {
-      "src": "^/(?:lib(?:/.*)?|vercel\\.json|package(?:-lock)?\\.json)$",
+      "src": "^/(?:lib(?:/.*)?|(?:AUTH_SETUP|PAYMENTS_SETUP)\\.md|vercel\\.json|package(?:-lock)?\\.json)$",
       "dest": "/api/not-found"
     },
     {
