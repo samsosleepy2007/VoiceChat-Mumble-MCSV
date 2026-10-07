@@ -13,11 +13,11 @@ function fail(code){throw new MCSVError(code);}
 export function createMCSVClient(key,request=fetch){
  if(typeof key!=='string'||key.length>512||!/^mcsv_[A-Za-z0-9_-]{8,}$/.test(key))fail('invalid_key');
  async function call(name,args={},catalog=false){
-  let response;
-  try{response=await request('https://api.mcsv.me/api/v1/tools'+(catalog?'':'/'+name),{method:catalog?'GET':'POST',redirect:'error',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},...(catalog?{}:{body:JSON.stringify(args)}),signal:AbortSignal.timeout(30000)});}catch(error){throw new MCSVError(['TimeoutError','AbortError'].includes(error?.name)?'timeout':'unavailable');}
+  let response;const timeoutMs=['files_upload_base64','files_decompress','files_compress'].includes(name)?120000:30000;
+  try{response=await request('https://api.mcsv.me/api/v1/tools'+(catalog?'':'/'+name),{method:catalog?'GET':'POST',redirect:'error',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},...(catalog?{}:{body:JSON.stringify(args)}),signal:AbortSignal.timeout(timeoutMs)});}catch(error){const failure=new MCSVError(['TimeoutError','AbortError'].includes(error?.name)?'timeout':'unavailable');failure.operation=name;throw failure;}
   const code={400:'rejected',401:'invalid_key',403:'permission',404:'endpoint',409:'installing',410:'invalid_key',429:'rate_limit'}[response.status];
   if(!response.ok)throw new MCSVError(code||'upstream',response.status);
-  let data;try{data=await response.json();}catch{fail('invalid_response');}
+  let data;try{data=await response.json();}catch(error){const failure=new MCSVError(['TimeoutError','AbortError'].includes(error?.name)?'timeout':'invalid_response');failure.operation=name;throw failure;}
   if(data.ok!==true||(!catalog&&(!data.result||data.result.error||data.result.success===false||data.result.denied)))fail('rejected');
   return catalog?data:data.result;
  }
@@ -134,7 +134,7 @@ export async function installOnMCSV(client,body,loadArtifacts,authorize=async()=
   // Install files before restarting; reject a server already changing power state.
   const runtime=await client.call('server_overview');if(runtime.info?.id!==plan.server.id||!['offline','running'].includes(runtime.runtime?.current_state))fail('server_running');
   stage='packs';const archiveFiles={};for(const pack of PACKS)for(const [name,data] of Object.entries(source.packs[pack.type]))archiveFiles[(internal.existing[pack.type]||pack.type+'_packs/'+pack.folder)+'/'+name]=data;
-  if(Object.keys(archiveFiles).length){const archive='SleepyMumla-packs-'+randomUUID()+'.zip';mutated=true;await client.call('files_upload_base64',{path:'/'+archive,content_base64:Buffer.from(zipSync(archiveFiles,{level:6})).toString('base64')});await client.call('files_decompress',{root:'/',file:archive});}
+  if(Object.keys(archiveFiles).length){const archive='SleepyMumla-packs-'+randomUUID()+'.zip';mutated=true;stage='packs_upload';await client.call('files_upload_base64',{path:'/'+archive,content_base64:Buffer.from(zipSync(archiveFiles,{level:6})).toString('base64')});stage='packs_extract';await client.call('files_decompress',{root:'/',file:archive});}
   stage='plugin';mutated=true;if(internal.obsoletePlugins.length)await client.call('files_delete',{root:'/plugins',files:internal.obsoletePlugins});await client.call('files_upload_base64',{path:'/plugins/'+WHEEL,content_base64:source.wheel.toString('base64')});
   stage='config';const configPath='/plugins/mumble_host/config.toml';if(internal.config!==null){const edit=configEdit(internal.config,body.voicePort);if(edit.old_string!==edit.new_string)await client.call('files_edit',{path:configPath,edits:[edit]});}else await client.call('files_write',{path:configPath,force_new:true,content:'[tracking]\ninterval_ticks = 4\nposition_epsilon = 0.05\nrotation_epsilon = 1.0\nheartbeat_seconds = 2\n\n[mumble]\nport = '+body.voicePort+'\nusers = 20\n\n[local_state]\nhost = "127.0.0.1"\nport = 47855\nmax_queue = 4096\n\n[voice]\ndefault_range = 30\nmax_range = 60\ndefault_attenuation_level = 3\n'});
   stage='world';for(const pack of PACKS){const item=internal.packLists[pack.type],content=mergePacks(item.content,pack.uuid);if(item.exists){if(item.content!==content)await client.call('files_edit',{path:item.path,edits:[{old_string:item.content,new_string:content}]});}else await client.call('files_write',{path:item.path,content});}
