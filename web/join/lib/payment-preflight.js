@@ -9,7 +9,7 @@ try{
  const result=await client.query("SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('sleepy_payment_orders','sleepy_payment_attempts','sleepy_install_entitlements')");
  if(result.rows.length!==3)throw Error('payment_schema');
  const column=await client.query("SELECT column_name FROM information_schema.columns WHERE table_name='sleepy_install_entitlements' AND column_name='installed_at'");if(column.rows.length!==1)throw Error('installation_grant_schema');
- console.log('PAYMENT_DATABASE_OK');
+ const history=await client.query("SELECT column_name FROM information_schema.columns WHERE table_name='sleepy_payment_orders' AND column_name IN ('purchase_number','installation_state','server_name')");if(history.rows.length!==3)throw Error('history_schema');console.log('PAYMENT_DATABASE_OK');
 }catch{console.error('PAYMENT_DATABASE_FAILED');process.exitCode=1;}finally{await client.end();}
 if(config.slipok){
  try{

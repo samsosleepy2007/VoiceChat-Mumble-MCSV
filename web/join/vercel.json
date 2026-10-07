@@ -66,6 +66,10 @@
       "dest": "/install.html"
     },
     {
+      "src": "^/history/?$",
+      "dest": "/history.html"
+    },
+    {
       "handle": "filesystem"
     }
   ],

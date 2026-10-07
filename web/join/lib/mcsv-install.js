@@ -111,15 +111,15 @@ export function backupGroups(paths){
  }
  return [...groups].map(([root,files])=>({root,files:[...files]}));
 }
-export async function installOnMCSV(client,body,loadArtifacts,authorize=async()=>{}){
+export async function installOnMCSV(client,body,loadArtifacts,authorize=async()=>{},progress=async()=>{}){
  const plan=await prepareInstallation(client);if(!plan.compatible)fail('incompatible');if(!plan.installAllowed)fail('permission');
  if(plan.server.id!==body.serverId||plan.world!==body.world)fail('server_changed');
  if(!['offline','running'].includes(plan.state))fail('server_running');
  if(!plan.ports.includes(body.voicePort))fail('invalid_port');
  if(body.start===true&&!plan.canStart)fail('permission');
  if(plan.installation.status==='current'&&body.reinstall!==true)fail('reinstall_confirmation');
- await authorize(publicPlan(plan));
- if(active.has(plan.server.id))fail('busy');active.add(plan.server.id);
+ if(active.has(plan.server.id))fail('busy');
+ await authorize(publicPlan(plan));active.add(plan.server.id);
  let stage='download',mutated=false;
  try{
   const source=await loadArtifacts();const internal=plan.internal;
@@ -139,10 +139,10 @@ export async function installOnMCSV(client,body,loadArtifacts,authorize=async()=
   stage='config';const configPath='/plugins/mumble_host/config.toml';if(internal.config!==null){const edit=configEdit(internal.config,body.voicePort);if(edit.old_string!==edit.new_string)await client.call('files_edit',{path:configPath,edits:[edit]});}else await client.call('files_write',{path:configPath,force_new:true,content:'[tracking]\ninterval_ticks = 4\nposition_epsilon = 0.05\nrotation_epsilon = 1.0\nheartbeat_seconds = 2\n\n[mumble]\nport = '+body.voicePort+'\nusers = 20\n\n[local_state]\nhost = "127.0.0.1"\nport = 47855\nmax_queue = 4096\n\n[voice]\ndefault_range = 30\nmax_range = 60\ndefault_attenuation_level = 3\n'});
   stage='world';for(const pack of PACKS){const item=internal.packLists[pack.type],content=mergePacks(item.content,pack.uuid);if(item.exists){if(item.content!==content)await client.call('files_edit',{path:item.path,edits:[{old_string:item.content,new_string:content}]});}else await client.call('files_write',{path:item.path,content});}
   stage='verify';for(const pack of PACKS){const list=JSON.parse(await read(client,internal.packLists[pack.type].path));if(!list.some(p=>p.pack_id===pack.uuid&&JSON.stringify(p.version)===JSON.stringify(VERSION)))fail('verification_failed');const target=internal.existing[pack.type]||pack.type+'_packs/'+pack.folder;const manifest=JSON.parse(await read(client,'/'+target+'/manifest.json'));if(manifest.header?.uuid!==pack.uuid)fail('verification_failed');}
-  const files=await listing(client,'/plugins');if(!files.some(f=>f.name===WHEEL&&f.size===source.wheel.length))fail('verification_failed');
+  await progress('addon');const files=await listing(client,'/plugins');if(!files.some(f=>f.name===WHEEL&&f.size===source.wheel.length))fail('verification_failed');
   const uploaded=await client.call('files_read_base64',{path:'/plugins/'+WHEEL});if(typeof uploaded.content_base64!=='string'||createHash('sha256').update(Buffer.from(uploaded.content_base64,'base64')).digest('hex')!==createHash('sha256').update(source.wheel).digest('hex'))fail('verification_failed');
   const confirmed=await read(client,configPath);const edit=configEdit(confirmed,body.voicePort);if(edit.old_string!==edit.new_string)fail('verification_failed');
-  stage='restart';const beforePower=await client.call('server_overview');if(beforePower.info?.id!==plan.server.id||!['running','offline'].includes(beforePower.runtime?.current_state))fail('server_running');const action=beforePower.runtime.current_state==='running'?'restart':'start';const previousUptime=beforePower.runtime.resources?.uptime;await client.call('power_action',{action});
+  await progress('plugin');stage='restart';const beforePower=await client.call('server_overview');if(beforePower.info?.id!==plan.server.id||!['running','offline'].includes(beforePower.runtime?.current_state))fail('server_running');const action=beforePower.runtime.current_state==='running'?'restart':'start';const previousUptime=beforePower.runtime.resources?.uptime;await client.call('power_action',{action});
   return {installed:true,started:true,powerAction:action,previousUptime:Number.isFinite(previousUptime)?previousUptime:null,server:{id:plan.server.id,name:plan.server.name,host:plan.server.host},world:plan.world,voicePort:body.voicePort,backup:backups[0]||null,backups,pluginVersion:'0.5.5',addonVersion:'2.15.39'};
  }catch(error){if(!(error instanceof MCSVError))error=new MCSVError('install_failed');error.stage=stage;error.partial=mutated;throw error;}finally{active.delete(plan.server.id);}
 }

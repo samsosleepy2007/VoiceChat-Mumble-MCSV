@@ -19,18 +19,18 @@ export function paymentConfig(env=process.env){
  return {amount,promptpay,truemoney,slipok,branch,key,phone:env.TRUEMONEY_PHONE,target:env.PROMPTPAY_ID,receiver:env.PAYMENT_RECEIVER_NAME};
 }
 let pool;
-function database(){if(!pool)pool=new pg.Pool({connectionString:process.env.PAYMENT_DATABASE_URL||process.env.DATABASE_URL,max:2,connectionTimeoutMillis:5000,idleTimeoutMillis:10000});return pool;}
+export function database(){if(!pool)pool=new pg.Pool({connectionString:process.env.PAYMENT_DATABASE_URL||process.env.DATABASE_URL,max:2,connectionTimeoutMillis:5000,idleTimeoutMillis:10000});return pool;}
 export function paymentStore(db=database()){
  return {
  async entitled(user,server){return Boolean((await db.query('SELECT 1 FROM sleepy_install_entitlements WHERE user_id=$1 AND server_id=$2 AND installed_at IS NULL',[user,server])).rowCount);},
  async installed(user,server){await db.query('UPDATE sleepy_install_entitlements SET installed_at=now() WHERE user_id=$1 AND server_id=$2 AND installed_at IS NULL',[user,server]);},
- async checkout(user,server,amount){
+ async checkout(user,server,amount,serverName=null,userName=null){
   const c=await db.connect();try{
    await c.query('BEGIN');await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[user+':'+server]);
    if((await c.query('SELECT 1 FROM sleepy_install_entitlements WHERE user_id=$1 AND server_id=$2 AND installed_at IS NULL',[user,server])).rowCount){await c.query('COMMIT');return {status:'paid'};}
    await c.query("UPDATE sleepy_payment_orders SET status='expired' WHERE user_id=$1 AND server_id=$2 AND status='pending' AND (expires_at<=now() OR amount_satang<>$3)",[user,server,amount]);
    const old=await c.query("SELECT * FROM sleepy_payment_orders WHERE user_id=$1 AND server_id=$2 AND status IN ('pending','verifying','review') ORDER BY created_at DESC LIMIT 1",[user,server]);
-   const result=old.rowCount?old:await c.query(`INSERT INTO sleepy_payment_orders(id,user_id,server_id,amount_satang) VALUES($1,$2,$3,$4) RETURNING *`,[randomUUID(),user,server,amount]);await c.query('COMMIT');return result.rows[0];
+   const result=old.rowCount?old:await c.query(`INSERT INTO sleepy_payment_orders(id,user_id,server_id,amount_satang,server_name,user_name) VALUES($1,$2,$3,$4,$5,$6) RETURNING *`,[randomUUID(),user,server,amount,serverName,userName]);await c.query('COMMIT');return result.rows[0];
   }catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}
  },
  async order(id,user){const r=await db.query('SELECT * FROM sleepy_payment_orders WHERE id=$1 AND user_id=$2',[id,user]);if(!r.rowCount)throw new PaymentError('payment_order');return r.rows[0];},
@@ -54,7 +54,7 @@ export function paymentStore(db=database()){
   const c=await db.connect();try{
    await c.query('BEGIN');await c.query('SELECT id FROM sleepy_payment_orders WHERE id=$1 FOR UPDATE',[order.id]);
    await c.query("UPDATE sleepy_payment_attempts SET provider_reference=$2,status='paid',amount_satang=$3 WHERE proof_key=$1",[key,result.reference,result.amount]);
-   await c.query("UPDATE sleepy_payment_orders SET status='paid',paid_at=now() WHERE id=$1",[order.id]);
+   await c.query("UPDATE sleepy_payment_orders SET status='paid',paid_at=now(),purchase_number=nextval('sleepy_purchase_sequence'),payment_method=(SELECT method FROM sleepy_payment_attempts WHERE proof_key=$2),installation_state='waiting' WHERE id=$1",[order.id,key]);
    await c.query('INSERT INTO sleepy_install_entitlements(user_id,server_id,order_id,installed_at) VALUES($1,$2,$3,NULL) ON CONFLICT(user_id,server_id) DO UPDATE SET order_id=EXCLUDED.order_id,installed_at=NULL',[order.user_id,order.server_id,order.id]);
    await c.query('COMMIT');
   }catch(e){await c.query('ROLLBACK');throw new PaymentError('payment_review',true);}finally{c.release();}
@@ -65,10 +65,10 @@ export function paymentStore(db=database()){
  }
  };
 }
-export async function checkoutPayment(user,server){
+export async function checkoutPayment(user,server,serverName=null,userName=null){
  if(!paymentsEnabled())return {required:false};const config=paymentConfig();const store=paymentStore();
  if(await store.entitled(user,server))return {required:true,paid:true};
- const o=await store.checkout(user,server,config.amount);
+ const o=await store.checkout(user,server,config.amount,serverName,userName);
  if(o.status==='paid')return {required:true,paid:true};
  return {required:true,paid:false,status:o.status,orderId:o.id,amountSatang:o.amount_satang,expiresAt:o.expires_at,methods:{promptpay:config.promptpay,truemoney:config.truemoney},receiver:config.receiver,truemoneyPhone:config.truemoney?config.phone:null,promptpayId:config.promptpay?config.target:null,qr:config.promptpay?await QRCode.toDataURL(generatePayload(config.target,{amount:o.amount_satang/100}),{width:320,margin:2}):null};
 }
