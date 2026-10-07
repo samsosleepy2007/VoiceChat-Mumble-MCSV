@@ -1,5 +1,15 @@
 # Protected distributions
 
+## Development and distribution policy
+
+- Edit and update readable sources in `src/endstone_mumble_host/` and `addon/`.
+- Regenerate protected artifacts from the updated sources; never edit generated protected code manually.
+- Keep installation and release artifacts in `obfuscator/plugin/` and `obfuscator/addon/`.
+- For future MCSV installations and releases, use verified protected artifacts from `obfuscator/`, not readable development packages.
+- Run the protection checks, update `SHA256SUMS.txt`, and test on MCSV before promoting a new build to distribution.
+- When updating the website installer, point it to the approved protected release and update its pinned SHA256 values. This policy does not switch the currently deployed installer automatically.
+- Keep development sources and build tools available for maintenance; preserve project and upstream license notices in distributions.
+
 Build: `npm ci --prefix tools/obfuscation --ignore-scripts` then `python tools/build_obfuscated.py`.
 
 - addon/: complete BP/RP addon; JavaScript identifiers are mangled by pinned Terser 5.44.0. Compression/unsafe optimizations/property mangling/source maps are disabled. No runtime decoder or watchdog-heavy control-flow transformations.
