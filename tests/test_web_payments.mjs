@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { satang,voucherCode,slipImage,checkSlip,redeemEnvelope,PaymentError } from '../web/join/lib/payment-providers.js';
 import { paymentConfig,paymentStore,payOrder,requirePayment } from '../web/join/lib/payments.js';
 import { PGlite } from '../web/join/node_modules/@electric-sql/pglite/dist/index.js';
+import { trueMoneyClient } from '../web/join/lib/truemoney-client.js';
 
 assert.equal(satang('100.25'),10025);for(const bad of ['1e2','-1','1.123',NaN,'100abc'])assert.throws(()=>satang(bad));
 const link='https://gift.truemoney.com/campaign/?v=abcdef0123456789';assert.equal(voucherCode(link),'abcdef0123456789');
@@ -23,6 +24,20 @@ let redeemed=0;const wallet={verifyVoucher:async()=>({success:true,data:{voucher
 assert.equal((await redeemEnvelope(order,'abcdef0123456789',config,wallet)).amount,10000);
 await assert.rejects(redeemEnvelope(order,'abcdef0123456789',config,{...wallet,verifyVoucher:async()=>({success:true,data:{voucher:{member:2}}})}),e=>e.code==='voucher_single');assert.equal(redeemed,1);
 await assert.rejects(redeemEnvelope(order,'abcdef0123456789',config,{...wallet,redeemVoucher:async()=>({success:false,code:'TIMEOUT'})}),e=>e.uncertain);
+// Read-only failures never claim a bad envelope or hold the order as received money.
+for(const code of ['NETWORK_ERROR','TIMEOUT','INVALID_RESPONSE','MAINTENANCE'])await assert.rejects(redeemEnvelope(order,'abcdef0123456789',config,{...wallet,verifyVoucher:async()=>({success:false,code})}),e=>e.code==='voucher_unavailable'&&!e.uncertain);
+assert.equal(redeemed,1);
+let providerPosts=0;
+const blocked=trueMoneyClient({fetcher:async(url,options)=>{assert.equal(options.redirect,'error');assert.equal(new Headers(options.headers).get('user-agent'),'SleepyMumla/1.0 (+https://sleepyvoice-join.vercel.app)');if(options.method==='POST')providerPosts++;return new Response('Forbidden',{status:403,headers:{'cf-mitigated':'challenge'}});}});
+await assert.rejects(redeemEnvelope(order,'abcdef0123456789',config,blocked.client,blocked.transport),e=>e.code==='voucher_unavailable'&&!e.uncertain);
+assert.equal(providerPosts,0);assert.equal(blocked.transport.blocked,true);assert.equal(blocked.transport.challenge,true);
+await assert.rejects(redeemEnvelope(order,'abcdef0123456789',config,{...wallet,redeemVoucher:async()=>({success:false,code:'TIMEOUT'})},{redeemAttempted:false}),e=>e.code==='voucher_unavailable'&&!e.uncertain);
+const postTimeout=trueMoneyClient({fetcher:async(url,options)=>{
+ if(options.method==='POST'){providerPosts++;throw Error('connection closed after POST');}
+ return Response.json({status:{code:'SUCCESS',message:'OK'},data:url.endsWith('/configuration')?{}:{voucher:{member:1,amount_baht:'100.00'},owner_profile:{}}});
+}});
+await assert.rejects(redeemEnvelope(order,'abcdef0123456789',config,postTimeout.client,postTimeout.transport),e=>e.code==='payment_review'&&e.uncertain);
+assert.equal(providerPosts,1);assert.equal(postTimeout.transport.redeemAttempted,true);
 
 // Embedded PostgreSQL exercises the actual schema, row state and unique constraints.
 const db=new PGlite();await db.exec(await readFile(new URL('../web/join/lib/payment-schema.sql',import.meta.url),'utf8'));
@@ -35,6 +50,12 @@ assert.equal((await payOrder('user-a',body,store,config,providers)).paid,true);a
 assert.equal((await payOrder('user-a',body,store,config,providers)).paid,true);assert.equal(verified,1);assert.equal((await store.checkout('user-a','server-a',10000)).status,'paid');
 const other=await store.checkout('user-b','server-b',10000);await assert.rejects(payOrder('user-b',{...body,orderId:other.id},store,config,providers),e=>e.code==='payment_duplicate');assert.equal(verified,1);
 const uncertain=await store.checkout('user-a','server-c',10000);const uncertainBody={...body,orderId:uncertain.id,voucher:link.replace('abcdef','abcdee')};
+const blockedOrder=await store.checkout('user-e','server-f',10000);const blockedBody={...body,orderId:blockedOrder.id,voucher:link.replace('abcdef','abcfff')};
+await assert.rejects(payOrder('user-e',blockedBody,store,config,{redeemEnvelope:async()=>{throw new PaymentError('voucher_unavailable');}}),e=>e.code==='voucher_unavailable');
+assert.equal((await store.order(blockedOrder.id,'user-e')).status,'pending');assert(!await store.entitled('user-e','server-f'));
+await assert.rejects(payOrder('user-e',blockedBody,store,config,providers),e=>e.code==='voucher_retry_wait');
+await db.query("UPDATE sleepy_payment_attempts SET created_at=now()-interval '2 minutes' WHERE order_id=$1",[blockedOrder.id]);
+assert.equal((await payOrder('user-e',blockedBody,store,config,{redeemEnvelope:async()=>({reference:'voucher:retried-after-read-only-failure',amount:10000})})).paid,true);
 await assert.rejects(payOrder('user-a',uncertainBody,store,config,{redeemEnvelope:async()=>{throw new PaymentError('payment_review',true);}}),e=>e.uncertain);
 assert.equal((await store.order(uncertain.id,'user-a')).status,'review');assert(!await store.entitled('user-a','server-c'));assert.equal((await store.checkout('user-a','server-c',10000)).id,uncertain.id);
 await assert.rejects(payOrder('user-a',uncertainBody,store,config,providers),e=>e.code==='payment_review');
