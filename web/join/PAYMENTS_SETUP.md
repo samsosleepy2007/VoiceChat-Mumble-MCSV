@@ -56,4 +56,10 @@ Payment tests use embedded PostgreSQL (PGlite), the real SQL schema and mocked p
 
 Production checkout is enabled at the owner-authorized 5 THB test price. Database connection and all three tables passed checks. SlipOK quota API authenticated successfully (100 quota at the check). The configured SlipOK branch may be either a numeric ID or its exact SlipOK API URL; the code extracts the ID from that fixed host/path. Internal setup documents are omitted from deployments and their URLs return 404.
 
-TrueMoney direct SDK requests returned HTTP 403 from Vercel. `TRUEMONEY_ENABLED=false` keeps envelopes unavailable until connectivity is fixed and verified. A real PromptPay transfer/slip and a full authenticated MCSV checkout/install have not been performed by the assistant. The owner must complete the real payment test.
+The owner confirmed that PromptPay works normally on 2026-10-07. The assistant has not performed a real transfer.
+
+TrueMoney direct SDK requests returned HTTP 403 from both Vercel and an MCSV read-only fetch on 2026-10-07. `TRUEMONEY_ENABLED=false` keeps envelopes unavailable until connectivity is fixed and verified. A common fixed-origin transport identifies the application honestly and rejects redirects; it does not impersonate a browser, solve challenges, or use a public proxy. `/api/payments/availability` exposes only status and whether a challenge header was observed, without payment data.
+
+Read-only TrueMoney failures now return `voucher_unavailable`, rather than incorrectly calling the envelope invalid. If a failure happens before any redemption POST, the order stays pending and the same envelope can be retried for that same order after one minute. A POST with an unknown outcome still holds the order for review and cannot be automatically retried. Switching a pending order to PromptPay remains available. Tests cover both cases against the actual SDK transport and database schema.
+
+The free voucher SDK is an unofficial integration into the gift website, not a merchant API. If the provider continues to block it, automatic acceptance needs a supported merchant/payment-gateway integration or a separately chosen, authorized voucher provider. Do not enable envelopes merely because a library update or health endpoint passes: a real single-recipient payment and grant must be checked before collection is enabled.
