@@ -28,7 +28,7 @@ export function paymentStore(db=database()){
   const c=await db.connect();try{
    await c.query('BEGIN');await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[user+':'+server]);
    if((await c.query('SELECT 1 FROM sleepy_install_entitlements WHERE user_id=$1 AND server_id=$2 AND installed_at IS NULL',[user,server])).rowCount){await c.query('COMMIT');return {status:'paid'};}
-   await c.query("UPDATE sleepy_payment_orders SET status='expired' WHERE user_id=$1 AND server_id=$2 AND status='pending' AND expires_at<=now()",[user,server]);
+   await c.query("UPDATE sleepy_payment_orders SET status='expired' WHERE user_id=$1 AND server_id=$2 AND status='pending' AND (expires_at<=now() OR amount_satang<>$3)",[user,server,amount]);
    const old=await c.query("SELECT * FROM sleepy_payment_orders WHERE user_id=$1 AND server_id=$2 AND status IN ('pending','verifying','review') ORDER BY created_at DESC LIMIT 1",[user,server]);
    const result=old.rowCount?old:await c.query(`INSERT INTO sleepy_payment_orders(id,user_id,server_id,amount_satang) VALUES($1,$2,$3,$4) RETURNING *`,[randomUUID(),user,server,amount]);await c.query('COMMIT');return result.rows[0];
   }catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}
