@@ -1,0 +1,23 @@
+name: Build protected addon and plugin
+on:
+  push:
+    branches: [obfuscator-build]
+    paths: [tools/build_obfuscated.py, tools/obfuscation/**, .github/workflows/build-obfuscator.yml]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - run: npm ci --prefix tools/obfuscation --ignore-scripts --no-audit --no-fund
+      - run: python3 tools/build_obfuscated.py
+      - run: node --input-type=module --check < obfuscator/addon/main.protected.js
+      - run: node tools/obfuscation/verify.mjs
+      - name: Save protected distributions on this branch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add obfuscator/addon obfuscator/plugin obfuscator/SHA256SUMS.txt
+          git commit -m 'Build protected addon and plugin distributions' || exit 0
+          git push origin HEAD:obfuscator-build
