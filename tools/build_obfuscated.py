@@ -24,9 +24,9 @@ class Locals(ast.NodeTransformer):
         return node
     visit_AsyncFunctionDef=visit_FunctionDef
 
-def protect_python(text):
-    tree=Locals().visit(ast.parse(text));ast.fix_missing_locations(tree)
-    result=ast.unparse(tree)+'\n';compile(result,'<protected>','exec');return result.encode()
+def protect_python(text, filename='<protected>'):
+    from plugin_protection import protect
+    return protect(text, filename)
 
 def digest(data):return hashlib.sha256(data).hexdigest()
 def main():
@@ -51,7 +51,7 @@ def main():
     dist='endstone_mumble_host-0.5.5.dist-info';files={}
     for path in sorted((ROOT/'src/endstone_mumble_host').rglob('*')):
         if path.is_file() and '__pycache__' not in path.parts:
-            name=path.relative_to(ROOT/'src').as_posix();data=path.read_bytes();files[name]=protect_python(data.decode()) if path.suffix=='.py' else data
+            name=path.relative_to(ROOT/'src').as_posix();data=path.read_bytes();files[name]=protect_python(data.decode(), name) if path.suffix=='.py' else data
     files[dist+'/METADATA']=b'Metadata-Version: 2.1\nName: endstone-mumble-host\nVersion: 0.5.5\nRequires-Python: >=3.11\nRequires-Dist: endstone>=0.11.0\n'
     files[dist+'/WHEEL']=b'Wheel-Version: 1.0\nGenerator: sleepy-protected\nRoot-Is-Purelib: true\nTag: py3-none-any\n'
     files[dist+'/entry_points.txt']=b'[endstone]\nmumble_host = endstone_mumble_host:MumbleHost\n'
