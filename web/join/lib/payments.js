@@ -43,8 +43,9 @@ export function paymentStore(db=database()){
    const claim=await c.query(`INSERT INTO sleepy_payment_attempts(proof_key,order_id,method) VALUES($1,$2,$3)
     ON CONFLICT(proof_key) DO UPDATE SET status='verifying',error_code=NULL,created_at=now()
     WHERE sleepy_payment_attempts.order_id=EXCLUDED.order_id AND sleepy_payment_attempts.status='rejected'
-    AND sleepy_payment_attempts.error_code='slip_delay' AND sleepy_payment_attempts.created_at<now()-interval '10 minutes' RETURNING proof_key`,[key,id,method]);
-   if(!claim.rowCount)throw new PaymentError('payment_duplicate');
+    AND ((sleepy_payment_attempts.error_code='slip_delay' AND sleepy_payment_attempts.created_at<now()-interval '10 minutes')
+     OR (sleepy_payment_attempts.method='truemoney' AND sleepy_payment_attempts.error_code='voucher_unavailable' AND sleepy_payment_attempts.created_at<now()-interval '1 minute')) RETURNING proof_key`,[key,id,method]);
+   if(!claim.rowCount){const previous=await c.query('SELECT order_id,status,error_code FROM sleepy_payment_attempts WHERE proof_key=$1',[key]);const a=previous.rows[0];throw new PaymentError(a?.order_id===id&&a.status==='rejected'&&a.error_code==='voucher_unavailable'?'voucher_retry_wait':'payment_duplicate');}
    await c.query("UPDATE sleepy_payment_orders SET status='verifying' WHERE id=$1",[id]);await c.query('COMMIT');return o;
   }catch(e){await c.query('ROLLBACK');if(e.code==='23505')throw new PaymentError('payment_duplicate');throw e;}finally{c.release();}
  },
