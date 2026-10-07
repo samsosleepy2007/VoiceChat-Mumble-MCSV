@@ -8,14 +8,14 @@ export { PaymentError };
 export const paymentsEnabled=()=>process.env.PAYMENTS_ENABLED==='true';
 export function paymentConfig(env=process.env){
  const amount=Number(env.INSTALL_PRICE_SATANG);
- if(!env.PAYMENT_DATABASE_URL||!Number.isSafeInteger(amount)||amount<100||amount>20000000)throw new PaymentError('payment_unavailable');
+ if(!(env.PAYMENT_DATABASE_URL||env.DATABASE_URL)||!Number.isSafeInteger(amount)||amount<100||amount>20000000)throw new PaymentError('payment_unavailable');
  const promptpay=/^(0\d{9}|\d{13}|\d{15})$/.test(env.PROMPTPAY_ID||'')&&/^\d+$/.test(env.SLIPOK_BRANCH_ID||'')&&Boolean(env.SLIPOK_API_KEY)&&Boolean(env.PAYMENT_RECEIVER_NAME);
  const truemoney=/^0\d{9}$/.test(env.TRUEMONEY_PHONE||'');
  if(!promptpay&&!truemoney)throw new PaymentError('payment_unavailable');
  return {amount,promptpay,truemoney,branch:env.SLIPOK_BRANCH_ID,key:env.SLIPOK_API_KEY,phone:env.TRUEMONEY_PHONE,target:env.PROMPTPAY_ID,receiver:env.PAYMENT_RECEIVER_NAME};
 }
 let pool;
-function database(){if(!pool)pool=new pg.Pool({connectionString:process.env.PAYMENT_DATABASE_URL,max:2,connectionTimeoutMillis:5000,idleTimeoutMillis:10000});return pool;}
+function database(){if(!pool)pool=new pg.Pool({connectionString:process.env.PAYMENT_DATABASE_URL||process.env.DATABASE_URL,max:2,connectionTimeoutMillis:5000,idleTimeoutMillis:10000});return pool;}
 export function paymentStore(db=database()){
  return {
  async entitled(user,server){return Boolean((await db.query('SELECT 1 FROM sleepy_install_entitlements WHERE user_id=$1 AND server_id=$2',[user,server])).rowCount);},
