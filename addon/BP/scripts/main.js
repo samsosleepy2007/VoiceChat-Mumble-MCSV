@@ -1456,6 +1456,7 @@ async function showTouchpad(player, account, authorize) {
   if (!choice || !authorize() || heldPhoneData(player)?.id !== account.phoneId) return false;
   if (choice === "receive") {
     touchpadReceivers.set(player.id, { phoneId: account.phoneId, number: account.number });
+    try { player.playAnimation("animation.sleepybank.touchpad_receive", { controller: "sleepybank_touchpad", blendOutTime: 0.1 }); } catch {}
     player.sendMessage("[ SleepyBank ] เปิดทัชแพดรับเงินแล้วกำลังรอเงินเข้า...");
     return true;
   }
@@ -1479,7 +1480,6 @@ system.runInterval(() => {
     const player = world.getAllPlayers().find(p => p.id === id);
     if (!player) { touchpadReceivers.delete(id); continue; }
     if (!touchpadValid(player, receiver)) { stopTouchpad(player); continue; }
-    try { player.playAnimation("animation.sleepybank.touchpad_receive", { controller: "sleepybank_touchpad", blendOutTime: 0.1 }); } catch {}
   }
 }, 5);
 // ATM uses the PIN configured on the phone linked to this account.
@@ -3675,7 +3675,7 @@ system.runInterval(() => {
 }, 100);
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.15.41 — SleepyBank touchpad transfers"
+  "[VCMumbleItem/BP] Loaded v2.15.42 — stable touchpad arm loop"
 );
 
 // Verify real item registration and per-item metadata without giving test items.

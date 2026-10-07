@@ -12,7 +12,8 @@
             0
           ]
         }
-      }
+      },
+      "loop": true
     },
     "animation.sleepybank.touchpad_idle": {
       "animation_length": 0.15,
