@@ -4,7 +4,7 @@ import { MCSVError } from './mcsv.js';
 
 export const WHEEL='endstone_mumble_host-0.5.5-py3-none-any.whl';
 export const PACKS=[{type:'behavior',uuid:'b6411120-cc4e-44a9-b28d-f43b10cafd86',folder:'SleepyMumla_BP'},{type:'resource',uuid:'cb345edb-6e6c-49ac-9950-e2ae07bda214',folder:'SleepyMumla_RP'}];
-const VERSION=[2,15,39];
+const VERSION=[2,15,44];
 const PLUGIN_VERSION=[0,5,5];
 function compareVersion(a,b){if(!Array.isArray(a)||a.length!==3||a.some(n=>!Number.isSafeInteger(n)||n<0))fail('existing_version');for(let i=0;i<3;i++)if(a[i]!==b[i])return a[i]>b[i]?1:-1;return 0;}
 const REQUIRED=['server_overview','files_list','files_read','files_read_many','files_read_base64','files_fetch_url','files_decompress','files_write','files_edit','files_compress','domain_info','power_action'];
@@ -96,9 +96,9 @@ export async function prepareInstallation(client){
 }
 export function publicPlan(plan){const {internal,...publicData}=plan;return publicData;}
 export async function fetchArtifacts(request,release){
- const definitions=[{name:WHEEL,hash:'9fef76a0b80ddf547582d388beb7b3aa12ba738761c5347e68c6afbdd39c57c4'},{name:'VC_Mumble_ItemMic_v2.15.39_MicFix.mcaddon',hash:'6472576d7f019ee25547d0908b8c7fd29617b37c579e9a75a055eae422b4a51b'}];
+ const definitions=[{name:'plugin/'+WHEEL,hash:'46d81b566857fb0162df4c99faf263172d404b537b7a11777ce48626771d072b'},{name:'addon/VC_Mumble_ItemMic_v2.15.44_protected.mcaddon',hash:'f7c46c34f00629a03d4d5e0d3556e1e265b65f95ef1fe185a3912422aaa35c4a'}];
  const bytes=[];for(const item of definitions){let response;try{response=await request(release+item.name,{signal:AbortSignal.timeout(30000)});}catch{fail('artifact_unavailable');}if(!response.ok)fail('artifact_unavailable');const buffer=Buffer.from(await response.arrayBuffer());if(buffer.length>4000000||createHash('sha256').update(buffer).digest('hex')!==item.hash)fail('artifact_integrity');bytes.push(buffer);}
- const addon=unzipSync(bytes[1]);const packs={};for(const pack of PACKS){const entry=Object.keys(addon).find(n=>n.includes('_'+(pack.type==='behavior'?'BP':'RP')+'_')&&n.endsWith('.mcpack'));if(!entry)fail('artifact_integrity');const files=unzipSync(addon[entry]);const manifest=JSON.parse(Buffer.from(files['manifest.json']).toString());if(manifest.header.uuid!==pack.uuid||JSON.stringify(manifest.header.version)!==JSON.stringify(VERSION))fail('artifact_integrity');if(Object.keys(files).some(n=>n.startsWith('/')||n.includes('\\')||n.split('/').some(p=>p==='..'||p==='.'||!p)))fail('artifact_integrity');packs[pack.type]=files;}
+ const addon=unzipSync(bytes[1]);const packs={};for(const pack of PACKS){const entry=Object.keys(addon).find(n=>n==='SleepyMumla_'+(pack.type==='behavior'?'BP':'RP')+'.mcpack'&&n.endsWith('.mcpack'));if(!entry)fail('artifact_integrity');const files=unzipSync(addon[entry]);const manifest=JSON.parse(Buffer.from(files['manifest.json']).toString());if(manifest.header.uuid!==pack.uuid||JSON.stringify(manifest.header.version)!==JSON.stringify(VERSION))fail('artifact_integrity');if(Object.keys(files).some(n=>n.startsWith('/')||n.includes('\\')||n.split('/').some(p=>p==='..'||p==='.'||!p)))fail('artifact_integrity');packs[pack.type]=files;}
  return {wheel:bytes[0],packs};
 }
 export function packArchive(source,targets){
@@ -107,7 +107,7 @@ export function packArchive(source,targets){
 }
 async function transfer(client,source,path,bytes,targets){
  if(!source.transferOrigin){await client.call('files_upload_base64',{path,content_base64:bytes.toString('base64')});return;}
- const url=new URL('/api/mcsv/artifact',source.transferOrigin);url.searchParams.set('kind',targets?'packs':'plugin');if(targets)for(const pack of PACKS)if(targets[pack.type])url.searchParams.set(pack.type,targets[pack.type]);
+ const url=new URL('/api/mcsv/artifact',source.transferOrigin);url.searchParams.set('kind',targets?'packs':'plugin');url.searchParams.set('version',VERSION.join('.'));if(targets)for(const pack of PACKS)if(targets[pack.type])url.searchParams.set(pack.type,targets[pack.type]);
  const at=path.lastIndexOf('/');await client.call('files_fetch_url',{directory:path.slice(0,at)||'/',filename:path.slice(at+1),url:url.toString()});
  const result=await client.call('files_read_base64',{path});if(typeof result.content_base64!=='string'||createHash('sha256').update(Buffer.from(result.content_base64,'base64')).digest('hex')!==createHash('sha256').update(bytes).digest('hex'))fail('verification_failed');
 }
@@ -153,7 +153,7 @@ export async function installOnMCSV(client,body,loadArtifacts,authorize=async()=
   const uploaded=await client.call('files_read_base64',{path:'/plugins/'+WHEEL});if(typeof uploaded.content_base64!=='string'||createHash('sha256').update(Buffer.from(uploaded.content_base64,'base64')).digest('hex')!==createHash('sha256').update(source.wheel).digest('hex'))fail('verification_failed');
   const confirmed=await read(client,configPath);const edit=configEdit(confirmed,body.voicePort);if(edit.old_string!==edit.new_string)fail('verification_failed');
   await progress('plugin');stage='restart';const beforePower=await client.call('server_overview');if(beforePower.info?.id!==plan.server.id||!['running','offline'].includes(beforePower.runtime?.current_state))fail('server_running');const action=beforePower.runtime.current_state==='running'?'restart':'start';const previousUptime=beforePower.runtime.resources?.uptime;await client.call('power_action',{action});
-  return {installed:true,started:true,powerAction:action,previousUptime:Number.isFinite(previousUptime)?previousUptime:null,server:{id:plan.server.id,name:plan.server.name,host:plan.server.host},world:plan.world,voicePort:body.voicePort,backup:backups[0]||null,backups,pluginVersion:'0.5.5',addonVersion:'2.15.39'};
+  return {installed:true,started:true,powerAction:action,previousUptime:Number.isFinite(previousUptime)?previousUptime:null,server:{id:plan.server.id,name:plan.server.name,host:plan.server.host},world:plan.world,voicePort:body.voicePort,backup:backups[0]||null,backups,pluginVersion:'0.5.5',addonVersion:VERSION.join('.')};
  }catch(error){if(!(error instanceof MCSVError))error=new MCSVError('install_failed');error.stage=stage;error.partial=mutated;throw error;}finally{active.delete(plan.server.id);}
 }
 
