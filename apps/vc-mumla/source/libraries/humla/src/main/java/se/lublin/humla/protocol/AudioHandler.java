@@ -124,20 +124,14 @@ public class AudioHandler extends HumlaNetworkListener implements AudioInput.Aud
         mEncoderLock = new Object();
 
         int actualSource = audioSource;
-        // MODE_IN_COMMUNICATION routes the voice stream as one unit; a media stream would follow
-        // its own route and can play from a second output at the same time.
-        int actualStream = AudioManager.STREAM_VOICE_CALL;
-        // Routing belongs to the voice session even if hardware AEC is unavailable/disabled.
-        mVcPreviousAudioMode = mAudioManager.getMode();
-        mAudioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
-        mVcCommunicationModeActive = true;
+        // Play voice like media. Some phones open both the earpiece and the loudspeaker in
+        // MODE_IN_COMMUNICATION; the media path uses the main speaker only and still follows
+        // wired/USB/Bluetooth headsets automatically.
+        int actualStream = AudioManager.STREAM_MUSIC;
         if (echoCancellationMethod.equals("system") /* android.media.audiofx.AcousticEchoCanceler */) {
-            // Android's system AEC expects a communication capture context.
+            // System AEC is attached to the capture session; it needs the voice capture source.
             actualSource = MediaRecorder.AudioSource.VOICE_COMMUNICATION;
-            Log.i(TAG, "VC-AEC audioMode=MODE_IN_COMMUNICATION"
-                    + " previousMode=" + mVcPreviousAudioMode
-                    + " inputSource=VOICE_COMMUNICATION"
-                    + " outputStream=" + audioStream);
+            Log.i(TAG, "VC-AEC audioMode=MODE_NORMAL inputSource=VOICE_COMMUNICATION outputStream=MUSIC");
         }
         mAudioSource = actualSource;
         mAudioStream = actualStream;

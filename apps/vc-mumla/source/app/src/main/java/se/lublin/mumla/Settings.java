@@ -366,12 +366,13 @@ public class Settings {
     }
 
     public int getVoiceAudioStream() {
-        // Voice always plays on the communication stream; the route picks speaker or earpiece.
-        return android.media.AudioManager.STREAM_VOICE_CALL;
+        // Voice plays like media so it uses the main speaker only (never the earpiece).
+        return android.media.AudioManager.STREAM_MUSIC;
     }
 
     public boolean isHandsetMode() {
-        return preferences.getBoolean(PREF_HANDSET_MODE, DEFAULT_HANDSET_MODE);
+        // The earpiece path was removed: voice always plays on the main speaker or a headset.
+        return false;
     }
 
     public boolean isPttSoundEnabled() {

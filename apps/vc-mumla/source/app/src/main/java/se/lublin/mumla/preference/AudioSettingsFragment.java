@@ -42,6 +42,8 @@ public class AudioSettingsFragment extends MumlaPreferenceFragment {
         actualPreference = findPreference("vc_audio_actual");
         testPreference = findPreference("vc_audio_test");
         outputPreference.setSummaryProvider(ListPreference.SimpleSummaryProvider.getInstance());
+        // Voice always uses the main speaker or a connected headset; there is nothing to choose.
+        outputPreference.setVisible(false);
         outputPreference.setOnPreferenceChangeListener((preference, value) -> {
             if (service != null) service.setAudioOutputPolicy((String) value);
             return true;
