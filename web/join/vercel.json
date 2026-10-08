@@ -35,11 +35,11 @@
     },
     {
       "src": "^/download$",
-      "dest": "https://raw.githubusercontent.com/samsosleepy2007/VoiceChat-Mumble-MCSV/5a2e5f09482bdcc8079a1a04323727f0edb52204/web/join/downloads/SleepyMumla-v0.6.3.apk"
+      "dest": "https://raw.githubusercontent.com/samsosleepy2007/VoiceChat-Mumble-MCSV/3611e336c44ee8babbe3884c226e48b18fa03c64/web/join/downloads/SleepyMumla-v0.6.9.apk"
     },
     {
       "src": "^/downloads/VC-Mumla-Web-Join.apk$",
-      "dest": "https://raw.githubusercontent.com/samsosleepy2007/VoiceChat-Mumble-MCSV/5a2e5f09482bdcc8079a1a04323727f0edb52204/web/join/downloads/SleepyMumla-v0.6.3.apk"
+      "dest": "https://raw.githubusercontent.com/samsosleepy2007/VoiceChat-Mumble-MCSV/3611e336c44ee8babbe3884c226e48b18fa03c64/web/join/downloads/SleepyMumla-v0.6.9.apk"
     },
     {
       "src": "^/$",
