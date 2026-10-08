@@ -72,6 +72,7 @@ jobs:
         run: |
           gh release upload sleepymumla-v0.6.4 out/* --repo "$GITHUB_REPOSITORY" --clobber
           gh release view sleepymumla-v0.6.4 --repo "$GITHUB_REPOSITORY" --json body --jq .body > release-notes.md
+          python3 -c "from pathlib import Path; p=Path('release-notes.md'); p.write_text(p.read_text().split('## Addon and plugin (both variants)')[0].replace('Android APK only. ', '').rstrip() + '\\n')"
           cat >> release-notes.md <<'NOTES'
 
           ## Addon and plugin (both variants)
