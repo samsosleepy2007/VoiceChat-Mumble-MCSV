@@ -48,6 +48,15 @@ public class SpeakerAudioRouteTest extends TestCase {
         assertEquals(AudioDeviceInfo.TYPE_BUILTIN_EARPIECE, SpeakerAudioRoute.chooseDeviceType("1",
                 new int[]{AudioDeviceInfo.TYPE_BUILTIN_SPEAKER, AudioDeviceInfo.TYPE_BUILTIN_EARPIECE}));
     }
+    public void testLegacyUsesLoudspeakerWithoutHeadset() {
+        assertTrue(SpeakerAudioRoute.legacySpeakerphone("auto", AudioDeviceInfo.TYPE_BUILTIN_SPEAKER, false));
+        assertTrue(SpeakerAudioRoute.legacySpeakerphone("auto", 0, false));
+    }
+    public void testLegacyLeavesHeadsetAndEarpieceAlone() {
+        assertFalse(SpeakerAudioRoute.legacySpeakerphone("auto", AudioDeviceInfo.TYPE_WIRED_HEADSET, true));
+        assertFalse(SpeakerAudioRoute.legacySpeakerphone("auto", 0, true));
+        assertFalse(SpeakerAudioRoute.legacySpeakerphone("1", AudioDeviceInfo.TYPE_BUILTIN_EARPIECE, false));
+    }
     public void testInvalidPreferenceUsesSafeDefault() {
         assertEquals(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER, SpeakerAudioRoute.chooseDeviceType("invalid",
                 new int[]{AudioDeviceInfo.TYPE_BUILTIN_EARPIECE, AudioDeviceInfo.TYPE_BUILTIN_SPEAKER}));

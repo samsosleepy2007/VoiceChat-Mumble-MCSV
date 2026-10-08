@@ -17,8 +17,11 @@
 
 package se.lublin.humla.audio;
 
+import android.media.AudioAttributes;
 import android.media.AudioFormat;
+import android.media.AudioManager;
 import android.media.AudioTrack;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Process;
@@ -98,13 +101,31 @@ public class AudioOutput implements Runnable, AudioOutputSpeech.TalkStateListene
         Log.v(TAG, "Using buffer size " + mBufferSize + ", system's min buffer size: " + minBufferSize);
 
         try {
-            mAudioTrack = new AudioTrack(audioStream,
-                    AudioHandler.SAMPLE_RATE,
-                    AudioFormat.CHANNEL_OUT_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT,
-                    mBufferSize * 2, // AudioTrack capacity is bytes; the mixer counts PCM16 samples.
-                    AudioTrack.MODE_STREAM);
-        } catch (IllegalArgumentException e) {
+            if (Build.VERSION.SDK_INT >= 23) {
+                // Attributes, not a legacy stream type, let the communication route own the output.
+                boolean voice = audioStream == AudioManager.STREAM_VOICE_CALL;
+                mAudioTrack = new AudioTrack.Builder()
+                        .setAudioAttributes(new AudioAttributes.Builder()
+                                .setUsage(voice ? AudioAttributes.USAGE_VOICE_COMMUNICATION : AudioAttributes.USAGE_MEDIA)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                                .build())
+                        .setAudioFormat(new AudioFormat.Builder()
+                                .setSampleRate(AudioHandler.SAMPLE_RATE)
+                                .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                                .build())
+                        .setBufferSizeInBytes(mBufferSize * 2) // Capacity is bytes; the mixer counts PCM16 samples.
+                        .setTransferMode(AudioTrack.MODE_STREAM)
+                        .build();
+            } else {
+                mAudioTrack = new AudioTrack(audioStream,
+                        AudioHandler.SAMPLE_RATE,
+                        AudioFormat.CHANNEL_OUT_MONO,
+                        AudioFormat.ENCODING_PCM_16BIT,
+                        mBufferSize * 2, // AudioTrack capacity is bytes; the mixer counts PCM16 samples.
+                        AudioTrack.MODE_STREAM);
+            }
+        } catch (IllegalArgumentException | UnsupportedOperationException e) {
             throw new AudioInitializationException(e);
         }
 

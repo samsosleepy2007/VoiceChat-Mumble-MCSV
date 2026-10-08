@@ -366,8 +366,8 @@ public class Settings {
     }
 
     public int getVoiceAudioStream() {
-        return android.os.Build.VERSION.SDK_INT >= 31 || isHandsetMode()
-                ? android.media.AudioManager.STREAM_VOICE_CALL : android.media.AudioManager.STREAM_MUSIC;
+        // Voice always plays on the communication stream; the route picks speaker or earpiece.
+        return android.media.AudioManager.STREAM_VOICE_CALL;
     }
 
     public boolean isHandsetMode() {

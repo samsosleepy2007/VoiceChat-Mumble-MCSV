@@ -124,9 +124,9 @@ public class AudioHandler extends HumlaNetworkListener implements AudioInput.Aud
         mEncoderLock = new Object();
 
         int actualSource = audioSource;
-        // Modern communication routing, including Bluetooth SCO, requires a voice stream.
-        int actualStream = android.os.Build.VERSION.SDK_INT >= 31 || bluetoothEnabled
-                ? AudioManager.STREAM_VOICE_CALL : audioStream;
+        // MODE_IN_COMMUNICATION routes the voice stream as one unit; a media stream would follow
+        // its own route and can play from a second output at the same time.
+        int actualStream = AudioManager.STREAM_VOICE_CALL;
         // Routing belongs to the voice session even if hardware AEC is unavailable/disabled.
         mVcPreviousAudioMode = mAudioManager.getMode();
         mAudioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);

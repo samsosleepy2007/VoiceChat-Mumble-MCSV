@@ -427,8 +427,7 @@ public class MumlaService extends HumlaService implements
                 break;
             case Settings.PREF_HANDSET_MODE:
                 setProximitySensorOn(isConnectionEstablished() && mSettings.isHandsetMode());
-                changedExtras.putInt(HumlaService.EXTRAS_AUDIO_STREAM, mSettings.isHandsetMode() ?
-                                     AudioManager.STREAM_VOICE_CALL : AudioManager.STREAM_MUSIC);
+                changedExtras.putInt(HumlaService.EXTRAS_AUDIO_STREAM, mSettings.getVoiceAudioStream());
                 break;
             case Settings.PREF_THRESHOLD:
                 changedExtras.putFloat(HumlaService.EXTRAS_DETECTION_THRESHOLD,
