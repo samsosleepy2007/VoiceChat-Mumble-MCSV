@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import pathlib
@@ -32,6 +33,11 @@ GLIBC_PREFIXES = (
     "libutil.so", "libresolv.so", "libanl.so", "libBrokenLocale.so",
     "libthread_db.so", "libnss_", "ld-linux-",
 )
+
+# Restart a crashed voice server, backing off; give up after a crash loop.
+RESTART_DELAYS = (5.0, 15.0, 60.0)
+RESTART_WINDOW_SECONDS = 600.0
+RESTART_LIMIT = 5
 
 
 class MumbleRuntimeHost:
@@ -170,9 +176,21 @@ class MumbleRuntimeHost:
         with urllib.request.urlopen(request, timeout=60) as response:
             return json.load(response)
 
+    @staticmethod
+    def _file_digest(path: pathlib.Path) -> str:
+        hasher = hashlib.sha256()
+        with open(path, "rb") as source:
+            for block in iter(lambda: source.read(1024 * 1024), b""):
+                hasher.update(block)
+        return "sha256:" + hasher.hexdigest()
+
     def _download_blob(self, token: str, digest: str, destination: pathlib.Path) -> None:
-        if destination.exists() and destination.stat().st_size > 0:
-            return
+        if not digest.startswith("sha256:"):
+            raise RuntimeError(f"unsupported layer digest: {digest}")
+        if destination.exists():
+            if self._file_digest(destination) == digest:
+                return
+            destination.unlink()
         request = urllib.request.Request(
             f"{DOCKER_REGISTRY}/v2/{MUMBLE_REPOSITORY}/blobs/{digest}",
             headers={"Authorization": f"Bearer {token}"},
@@ -182,6 +200,10 @@ class MumbleRuntimeHost:
         with urllib.request.urlopen(request, timeout=180) as response:
             with open(temporary, "wb") as output:
                 shutil.copyfileobj(response, output, length=1024 * 1024)
+        actual = self._file_digest(temporary)
+        if actual != digest:
+            temporary.unlink(missing_ok=True)
+            raise RuntimeError(f"layer digest mismatch: expected {digest} got {actual}")
         temporary.replace(destination)
 
     def _install_runtime(self) -> None:
@@ -298,6 +320,8 @@ class MumbleRuntimeHost:
         if openssl_modules.exists():
             env["OPENSSL_MODULES"] = str(openssl_modules)
 
+        if self._stdout is not None:
+            self._stdout.close()
         self._stdout = open(data / "mumble-stdout.log", "ab", buffering=0)
         self._set_status("starting")
         self._proc = subprocess.Popen(
@@ -330,14 +354,33 @@ class MumbleRuntimeHost:
             if not (ROOTFS / "usr/bin/mumble-server").exists():
                 self._install_runtime()
             binary = self._install_custom_binary()
-            self._start_mumble(binary)
-            while not self._stop.wait(1.0):
-                process = self._proc
-                if process is None:
+            crashes: list[float] = []
+            while True:
+                self._start_mumble(binary)
+                while not self._stop.wait(1.0):
+                    process = self._proc
+                    if process is None:
+                        return
+                    rc = process.poll()
+                    if rc is not None:
+                        break
+                else:
                     return
-                rc = process.poll()
-                if rc is not None:
-                    raise RuntimeError(f"mumble process exited unexpectedly rc={rc}")
+                now = time.monotonic()
+                crashes = [t for t in crashes if now - t < RESTART_WINDOW_SECONDS] + [now]
+                if len(crashes) > RESTART_LIMIT:
+                    raise RuntimeError(
+                        f"mumble process exited rc={rc}; "
+                        f"{len(crashes)} crashes within {int(RESTART_WINDOW_SECONDS)}s"
+                    )
+                delay = RESTART_DELAYS[min(len(crashes), len(RESTART_DELAYS)) - 1]
+                self._set_status(f"restarting-{len(crashes)}", f"rc={rc}")
+                self._logger.warning(
+                    f"Mumble exited rc={rc}; restarting in {delay:.0f}s "
+                    f"({len(crashes)}/{RESTART_LIMIT})"
+                )
+                if self._stop.wait(delay):
+                    return
         except Exception as exc:
             if not self._stop.is_set():
                 message = f"{type(exc).__name__}: {exc}"

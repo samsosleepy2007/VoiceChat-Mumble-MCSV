@@ -7,11 +7,11 @@ import sys
 root = Path(__file__).resolve().parents[1]
 source = ast.parse((root / 'src/endstone_mumble_host/plugin.py').read_text())
 cls = next(n for n in source.body if isinstance(n, ast.ClassDef) and n.name == 'MumbleHost')
-methods = [n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name in {'_state_message', '_voice_enabled_for'}]
+methods = [n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name in {'_state_message', '_voice_enabled_for', '_effective_range'}]
 ns = {'Player': object, 'PlayerState': object, 'Any': object}
 exec(compile(ast.fix_missing_locations(ast.Module(body=[ast.ImportFrom(module='__future__', names=[ast.alias(name='annotations')], level=0), ast.ClassDef(name='Bridge', bases=[], keywords=[], body=methods, decorator_list=[])], type_ignores=[])), '<bridge>', 'exec'), ns)
 bridge = ns['Bridge'](); bridge._default_range = 30; bridge._default_attenuation_level = 3
-bridge._bindings = {'a': {'range': 60}}
+bridge._bindings = {'a': {'range': 60}}; bridge._max_range = 60; bridge._range_limits = {}
 spec = importlib.util.spec_from_file_location('phone_model', root / 'src/endstone_mumble_host/model.py')
 model = importlib.util.module_from_spec(spec);sys.modules[spec.name] = model;spec.loader.exec_module(model)
 normal = model.PlayerState('A', 'a', 'a', 'Overworld', 0,64,0,0,0,True)

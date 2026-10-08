@@ -30,7 +30,7 @@ ATTENUATION_LEVELS: dict[int, str] = {
 
 class MumbleHost(Plugin):
     prefix = "MumbleHost"
-    version = "0.5.5"
+    version = "0.5.6"
     api_version = "0.11"
     description = "Unified MCSV Mumble server + Item Mic proximity + SleepyPhone call routing"
     authors = ["SamSoSleepy"]
@@ -59,6 +59,8 @@ class MumbleHost(Plugin):
         self._states: dict[str, PlayerState] = {}
         self._bindings: dict[str, dict[str, Any]] = {}
         self._calls: dict[str, dict[str, Any]] = {}
+        # Latest allowed maximum per player; stored ranges never exceed it.
+        self._range_limits: dict[str, int] = {}
         # Move persistent writes out of the Endstone world tick.
         self._binding_writer: ThreadPoolExecutor | None = None
         self._host: MumbleRuntimeHost | None = None
@@ -402,6 +404,15 @@ class MumbleHost(Plugin):
         player.send_message("MumbleHost: restarting local Mumble server.")
         self._show_main_menu(player)
 
+    def _range_limit(self, player: Player) -> int:
+        maximum = 1000 if self._is_operator(player) else self._max_range
+        self._range_limits[self._player_key(player)] = maximum
+        return maximum
+
+    def _effective_range(self, key: str, binding: dict[str, Any]) -> int:
+        stored = int(binding.get("range") or self._default_range)
+        return max(1, min(stored, self._range_limits.get(key, self._max_range)))
+
     def handle_player_join(self, player: Player) -> None:
         self._publish_addon_range_tags(player)
         self._publish_addon_attenuation_tags(player)
@@ -414,6 +425,7 @@ class MumbleHost(Plugin):
     def handle_player_quit(self, player: Player) -> None:
         key = self._player_key(player)
         state = self._states.pop(key, None)
+        self._range_limits.pop(key, None)
         name = state.name if state is not None else str(player.name)
         self._state_send({
             "type": "player_leave",
@@ -470,6 +482,7 @@ class MumbleHost(Plugin):
 
         for stale_key in set(self._states).difference(current_keys):
             stale = self._states.pop(stale_key)
+            self._range_limits.pop(stale_key, None)
             self._state_send({
                 "type": "player_leave",
                 "name": stale.name,
@@ -601,7 +614,7 @@ class MumbleHost(Plugin):
             "z": state.z,
             "yaw": state.yaw,
             "pitch": state.pitch,
-            "voiceRange": 4 if state.phone_voice_enabled else int(binding.get("range") or self._default_range),
+            "voiceRange": 4 if state.phone_voice_enabled else self._effective_range(key, binding),
             "voiceEnabled": bool(state.voice_enabled),
             "attenuationLevel": self._default_attenuation_level,
         }
@@ -649,9 +662,11 @@ class MumbleHost(Plugin):
 
         key = self._player_key(player)
         binding = dict(self._bindings.get(key, {}))
-        current_range = int(binding.get("range") or self._default_range)
-        maximum = 1000 if self._is_operator(player) else self._max_range
-        changed = False
+        previous_limit = self._range_limits.get(key)
+        maximum = self._range_limit(player)
+        current_range = self._effective_range(key, binding)
+        # Losing operator status or a lower max_range must apply immediately.
+        changed = previous_limit is not None and previous_limit != maximum
 
         for tag in tags:
             if tag.startswith("vcmumble.vr.sync."):
@@ -744,11 +759,8 @@ class MumbleHost(Plugin):
         maximum: int | None = None,
     ) -> None:
         key = self._player_key(player)
-        binding = self._bindings.get(key, {})
-        value = int(current_range or binding.get("range") or self._default_range)
-        max_value = int(
-            maximum or (1000 if self._is_operator(player) else self._max_range)
-        )
+        max_value = int(maximum or self._range_limit(player))
+        value = int(current_range or self._effective_range(key, self._bindings.get(key, {})))
         self._replace_player_tag_prefix(
             player,
             "vcmumble.vr.value.",
