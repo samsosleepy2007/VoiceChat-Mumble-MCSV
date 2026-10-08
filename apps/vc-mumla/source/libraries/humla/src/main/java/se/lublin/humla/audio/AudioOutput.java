@@ -77,6 +77,9 @@ public class AudioOutput implements Runnable, AudioOutputSpeech.TalkStateListene
     }
 
     public void setRoute(SpeakerAudioRoute route) { mRoute = route; }
+    private volatile boolean mMuted;
+    /** Half duplex: plays silence while true, keeping the track running. */
+    public void setMuted(boolean muted) { mMuted = muted; }
     public synchronized android.media.AudioDeviceInfo getRoutedDevice() {
         return mRoute == null ? null : mRoute.getRoutedDevice();
     }
@@ -179,6 +182,7 @@ public class AudioOutput implements Runnable, AudioOutputSpeech.TalkStateListene
 
         while(mRunning) {
             if(fetchAudio(mix, 0, mBufferSize)) {
+                if (mMuted) Arrays.fill(mix, (short) 0);
                 mAudioTrack.write(mix, 0, mBufferSize);
             } else {
                 Log.v(TAG, "Pausing thread.");
