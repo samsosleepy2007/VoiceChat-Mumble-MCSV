@@ -53,6 +53,30 @@ def exercise(path):
         assert bridge._state_message('a', normal)['voiceRange'] == 60
         assert bridge._state_message('a', phone)['voiceRange'] == 4
         assert bridge._bindings['a']['range'] == 60
+        # A stored operator range is clamped once the player loses operator.
+        bridge._max_range = 60
+        bridge._bindings = {'a': {'range': 1000}}
+        op = types.SimpleNamespace(xuid='a', unique_id='a', is_op=True)
+        assert bridge._range_limit(op) == 1000
+        assert bridge._state_message('a', normal)['voiceRange'] == 1000
+        op.is_op = False
+        assert bridge._range_limit(op) == 60
+        assert bridge._state_message('a', normal)['voiceRange'] == 60
+        assert bridge._bindings['a']['range'] == 1000
+        host_module = modules[1]
+        runtime = host_module.MumbleRuntimeHost.__new__(host_module.MumbleRuntimeHost)
+        with tempfile.TemporaryDirectory() as blobs:
+            blob = Path(blobs) / 'layer.tar'
+            blob.write_bytes(b'layer')
+            good = 'sha256:' + hashlib.sha256(b'layer').hexdigest()
+            assert runtime._file_digest(blob) == good
+            runtime._download_blob('token', good, blob)
+            assert blob.exists()
+            try:
+                runtime._download_blob('token', 'md5:x', blob)
+                raise AssertionError('unsupported digest accepted')
+            except RuntimeError:
+                pass
         assert bridge._voice_enabled_for(types.SimpleNamespace(scoreboard_tags=['vcmumble.call.mic', 'vcmumble.mic.off']))
         assert not bridge._voice_enabled_for(types.SimpleNamespace(scoreboard_tags=['vcmumble.mic.off']))
         events = []
@@ -65,16 +89,20 @@ def exercise(path):
         sys.path.pop(0)
 
 expected = exercise(ROOT / 'src')
-wheel = ROOT / 'obfuscator/plugin/endstone_mumble_host-0.5.5-py3-none-any.whl'
+import json
+release = json.loads((ROOT / 'web/join/lib/release.json').read_text())
+version = release['plugin']['version']
+wheel = ROOT / 'obfuscator/plugin' / release['plugin']['file']
+assert hashlib.sha256(wheel.read_bytes()).hexdigest() == release['plugin']['sha256']
 with zipfile.ZipFile(wheel) as archive, tempfile.TemporaryDirectory() as temp:
     assert archive.testzip() is None
-    for name, digest, size in csv.reader(io.StringIO(archive.read('endstone_mumble_host-0.5.5.dist-info/RECORD').decode())):
+    for name, digest, size in csv.reader(io.StringIO(archive.read(f'endstone_mumble_host-{version}.dist-info/RECORD').decode())):
         if not digest:
             continue
         data = archive.read(name)
         assert len(data) == int(size)
         assert digest == 'sha256=' + base64.urlsafe_b64encode(hashlib.sha256(data).digest()).decode().rstrip('=')
-    assert b'mumble_host = endstone_mumble_host:MumbleHost' in archive.read('endstone_mumble_host-0.5.5.dist-info/entry_points.txt')
+    assert b'mumble_host = endstone_mumble_host:MumbleHost' in archive.read(f'endstone_mumble_host-{version}.dist-info/entry_points.txt')
     for name in archive.namelist():
         if name.endswith('.py'):
             data = archive.read(name)

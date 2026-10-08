@@ -2,7 +2,7 @@ name: Build protected addon and plugin
 on:
   push:
     branches: [main, obfuscator-build]
-    paths: [addon/**, LICENSE*, tools/build_obfuscated.py, tools/plugin_protection.py, tests/test_protected_plugin.py, src/endstone_mumble_host/**, tools/obfuscation/**, .github/workflows/build-obfuscator.yml]
+    paths: [addon/**, LICENSE*, tools/build_obfuscated.py, tools/plugin_protection.py, tests/test_protected_plugin.py, tests/test_protected_addon.mjs, pyproject.toml, src/endstone_mumble_host/**, tools/obfuscation/**, .github/workflows/build-obfuscator.yml]
   workflow_dispatch:
 concurrency:
   group: protected-distributions-${{ github.ref }}
@@ -20,11 +20,14 @@ jobs:
       - run: python3 tools/build_obfuscated.py
       - run: node --input-type=module --check < obfuscator/addon/main.protected.js
       - run: node tools/obfuscation/verify.mjs
+      - run: node tests/test_protected_addon.mjs
       - run: python3 tests/test_protected_plugin.py
+      - name: Rebuild must be byte-identical
+        run: cp obfuscator/SHA256SUMS.txt /tmp/sums && python3 tools/build_obfuscated.py && diff /tmp/sums obfuscator/SHA256SUMS.txt
       - name: Save protected distributions on this branch
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add obfuscator/addon obfuscator/plugin obfuscator/SHA256SUMS.txt
+          git add -A obfuscator/addon obfuscator/plugin obfuscator/SHA256SUMS.txt web/join/lib/release.json
           git commit -m 'Build protected addon and plugin distributions' || exit 0
           git push origin "HEAD:${{ github.ref_name }}"
