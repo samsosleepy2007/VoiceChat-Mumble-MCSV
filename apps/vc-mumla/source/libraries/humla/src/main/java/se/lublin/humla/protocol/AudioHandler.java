@@ -65,7 +65,7 @@ public class AudioHandler extends HumlaNetworkListener implements AudioInput.Aud
     private final AudioManager mAudioManager;
     private int mVcPreviousAudioMode = AudioManager.MODE_NORMAL; // VC_AEC_AUDIO_MODE
     private boolean mVcCommunicationModeActive = false;
-    private SpeakerAudioRoute mVcSpeakerRoute;
+    private volatile SpeakerAudioRoute mVcSpeakerRoute;
     private final AudioInput mInput;
     private final AudioOutput mOutput;
     private AudioOutput.AudioOutputListener mOutputListener;
@@ -459,7 +459,9 @@ public class AudioHandler extends HumlaNetworkListener implements AudioInput.Aud
         if (mTalking ^ talking) {
             mEncodeListener.onTalkingStateChanged(talking);
             if (mHalfDuplex) {
-                mAudioManager.setStreamMute(getAudioStream(), talking);
+                // Silence our own track: Android does not let apps mute the voice-call stream,
+                // and muting the media stream would also silence other apps.
+                mOutput.setMuted(talking);
             }
 
             synchronized (mEncoderLock) {
@@ -516,10 +518,20 @@ public class AudioHandler extends HumlaNetworkListener implements AudioInput.Aud
     }
 
     private volatile long mLocalTestMuteUntil;
-    public void setAudioOutputPolicy(String policy) { mVcSpeakerRoute.setPolicy(policy); }
-    public android.media.AudioDeviceInfo[] getAudioOutputDevices() { return mVcSpeakerRoute.getDevices(); }
+    // The route is released on shutdown; the settings screen may still poll a stopped handler.
+    public void setAudioOutputPolicy(String policy) {
+        SpeakerAudioRoute route = mVcSpeakerRoute;
+        if (route != null) route.setPolicy(policy);
+    }
+    public android.media.AudioDeviceInfo[] getAudioOutputDevices() {
+        SpeakerAudioRoute route = mVcSpeakerRoute;
+        return route == null ? new android.media.AudioDeviceInfo[0] : route.getDevices();
+    }
     public android.media.AudioDeviceInfo getRoutedAudioDevice() { return mOutput.getRoutedDevice(); }
-    public String getAudioRouteStatus() { return mVcSpeakerRoute.getStatus(); }
+    public String getAudioRouteStatus() {
+        SpeakerAudioRoute route = mVcSpeakerRoute;
+        return route == null ? "Stopped" : route.getStatus();
+    }
     public boolean startAudioTest() {
         // Also block microphone transmission so the speaker test cannot leak back via capture.
         mLocalTestMuteUntil = android.os.SystemClock.elapsedRealtime() + 3500;
@@ -676,7 +688,13 @@ public class AudioHandler extends HumlaNetworkListener implements AudioInput.Aud
                     mInputSampleRate, mTargetBitrate, mTargetFramesPerPacket, mInputMode, targetId,
                     mAmplitudeBoost, mBluetoothEnabled, mHalfDuplexEnabled,
                     mPreprocessorEnabled, mEchoCancellationMethod, mEncodeListener, mTalkingListener);
-            handler.initialize(self, maxBandwidth, codec);
+            try {
+                handler.initialize(self, maxBandwidth, codec);
+            } catch (AudioException | RuntimeException error) {
+                // Release the microphone and restore the audio mode the constructor changed.
+                handler.shutdown();
+                throw error;
+            }
             return handler;
         }
     }
