@@ -5,7 +5,7 @@ on:
     paths: [apps/vc-mumla/**, .github/workflows/build-sleepymumla-single-speaker.yml]
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -46,3 +46,9 @@ jobs:
             out/*
             apps/vc-mumla/source/libraries/humla/build/test-results/**/*.xml
             apps/vc-mumla/source/app/build/test-results/**/*.xml
+      - name: Publish APK for device testing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete sleepymumla-v0.6.5 --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release create sleepymumla-v0.6.5 out/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title 'SleepyMumla v0.6.5 — Voice from one speaker only' --notes 'Fixes voice playing from the earpiece and loudspeaker at the same time. Routing now uses a single mechanism (communication device on Android 12+, speakerphone on older versions) without a per-track override; the voice track uses USAGE_VOICE_COMMUNICATION; the route is re-asserted after system changes. Headsets and Bluetooth still take priority. The audio status in Settings now shows commDevice and speakerphone. Debug build: if Android refuses to install over the previous version, uninstall it first. Plugin and addon unchanged.' --prerelease
