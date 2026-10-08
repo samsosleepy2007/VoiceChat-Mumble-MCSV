@@ -22,12 +22,12 @@ let pool;
 export function database(){if(!pool)pool=new pg.Pool({connectionString:process.env.PAYMENT_DATABASE_URL||process.env.DATABASE_URL,max:2,connectionTimeoutMillis:5000,idleTimeoutMillis:10000});return pool;}
 export function paymentStore(db=database()){
  return {
- async entitled(user,server){return Boolean((await db.query('SELECT 1 FROM sleepy_install_entitlements WHERE user_id=$1 AND server_id=$2 AND installed_at IS NULL',[user,server])).rowCount);},
+ async entitled(user,server){return Boolean((await db.query('SELECT 1 FROM sleepy_install_entitlements WHERE user_id=$1 AND server_id=$2',[user,server])).rowCount);},
  async installed(user,server){await db.query('UPDATE sleepy_install_entitlements SET installed_at=now() WHERE user_id=$1 AND server_id=$2 AND installed_at IS NULL',[user,server]);},
  async checkout(user,server,amount,serverName=null,userName=null){
   const c=await db.connect();try{
    await c.query('BEGIN');await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[user+':'+server]);
-   if((await c.query('SELECT 1 FROM sleepy_install_entitlements WHERE user_id=$1 AND server_id=$2 AND installed_at IS NULL',[user,server])).rowCount){await c.query('COMMIT');return {status:'paid'};}
+   if((await c.query('SELECT 1 FROM sleepy_install_entitlements WHERE user_id=$1 AND server_id=$2',[user,server])).rowCount){await c.query('COMMIT');return {status:'paid'};}
    await c.query("UPDATE sleepy_payment_orders SET status='expired' WHERE user_id=$1 AND server_id=$2 AND status='pending' AND (expires_at<=now() OR amount_satang<>$3)",[user,server,amount]);
    const old=await c.query("SELECT * FROM sleepy_payment_orders WHERE user_id=$1 AND server_id=$2 AND status IN ('pending','verifying','review') ORDER BY created_at DESC LIMIT 1",[user,server]);
    const result=old.rowCount?old:await c.query(`INSERT INTO sleepy_payment_orders(id,user_id,server_id,amount_satang,server_name,user_name) VALUES($1,$2,$3,$4,$5,$6) RETURNING *`,[randomUUID(),user,server,amount,serverName,userName]);await c.query('COMMIT');return result.rows[0];
