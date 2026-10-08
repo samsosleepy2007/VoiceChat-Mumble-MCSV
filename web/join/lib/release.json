@@ -1,0 +1,16 @@
+{
+  "plugin": {
+    "file": "endstone_mumble_host-0.5.6-py3-none-any.whl",
+    "version": "0.5.6",
+    "sha256": "a25d766ea12adbc3aac20ea4cbe841fd4b2255675d313c0a58d9db54f5bf70e0"
+  },
+  "addon": {
+    "file": "VC_Mumble_ItemMic_v2.15.44_protected.mcaddon",
+    "version": "2.15.44",
+    "sha256": "7e5e5bc9fc7ad50b80c759d9ff43a851bf9f8e6685750250edc66128bd0e347f"
+  },
+  "packs": {
+    "behavior": "b6411120-cc4e-44a9-b28d-f43b10cafd86",
+    "resource": "cb345edb-6e6c-49ac-9950-e2ae07bda214"
+  }
+}
