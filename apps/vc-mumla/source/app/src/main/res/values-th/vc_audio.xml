@@ -12,9 +12,8 @@
     <string name="vc_audio_unavailable">อุปกรณ์ที่เลือกไม่เชื่อมต่อ (ใช้อัตโนมัติชั่วคราว)</string>
     <string name="vc_audio_connect_first">เชื่อมต่อเซิร์ฟเวอร์เสียงก่อนเพื่อทดสอบเส้นทางเสียงจริง</string>
     <string name="vc_audio_unknown">ยังตรวจสอบเส้นทางเสียงไม่ได้ กดทดสอบเสียงเพื่อตรวจสอบ</string>
-    <string name="vc_speaker_channel">ลำโพงที่ใช้</string>
-    <string name="vc_speaker_channel_summary">สำหรับเครื่องที่ลำโพงแนบหูเป็นลำโพงตัวที่สอง เลือกช่องแล้วกด ทดสอบเสียง ถ้ายังออกด้านบนให้สลับอีกช่อง เลือกขณะถือเครื่องท่าเดียวกับตอนเล่น</string>
-    <string name="vc_speaker_both">ทั้งสองลำโพง</string>
-    <string name="vc_speaker_left">ช่องซ้ายอย่างเดียว</string>
-    <string name="vc_speaker_right">ช่องขวาอย่างเดียว</string>
+    <string name="vc_voice_mode">โหมดเสียง</string>
+    <string name="vc_voice_mode_call">แบบโทรศัพท์ (ลำโพงล่างตัวเดียว)</string>
+    <string name="vc_voice_mode_media">แบบสื่อ (สเตอริโอ อาจออกลำโพงแนบหูด้านบนด้วย)</string>
+    <string name="vc_voice_mode_summary">%s\nถ้าแบบโทรศัพท์เสียงเบาหรือขาด ๆ หาย ๆ ให้ลองแบบสื่อ</string>
 </resources>
