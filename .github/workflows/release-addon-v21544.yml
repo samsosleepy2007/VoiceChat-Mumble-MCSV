@@ -1,0 +1,84 @@
+name: Release addon v2.15.44
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  release:
+    if: contains(github.event.head_commit.message, '[release-addon-v2.15.44]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Verify and build readable addon
+        run: |
+          for test in tests/test_{atm,atm_pin,bank,bank_ui,contacts_ui,deposit,mainhand_only,periodic_work,phone_calls,phone_history,phone_lock,range_preview,ringtone_preview,touchpad,transfer}.mjs; do node "$test"; done
+          python3 tools/build_itemmic_addon.py
+          (cd obfuscator && sha256sum --check SHA256SUMS.txt)
+          python3 tests/test_protected_plugin.py
+      - name: Prepare release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p out previous
+          gh release download sleepymumla-v0.6.4 --repo "$GITHUB_REPOSITORY" --pattern 'endstone_mumble_host-0.5.5-py3-none-any.whl' --pattern 'SleepyMumla-v0.6.4.apk' --pattern 'SHA256SUMS-v0.6.4.txt' --dir previous
+          echo '9fef76a0b80ddf547582d388beb7b3aa12ba738761c5347e68c6afbdd39c57c4  previous/endstone_mumble_host-0.5.5-py3-none-any.whl' | sha256sum --check
+          (cd previous && sha256sum --check SHA256SUMS-v0.6.4.txt)
+          python3 - <<'PY'
+          from pathlib import Path
+          import zipfile, shutil, hashlib, json, io
+          out=Path('out')
+          version=[2,15,44]
+          def archive(name, entries):
+              with zipfile.ZipFile(out/name,'w',zipfile.ZIP_DEFLATED) as z:
+                  for source,target in entries:
+                      source=Path(source)
+                      if source.is_dir():
+                          for p in sorted(source.rglob('*')):
+                              if p.is_file() and '__pycache__' not in p.parts:
+                                  z.write(p,str(Path(target)/p.relative_to(source)))
+                      else: z.write(source,target)
+          readable=Path('release-assets/VC_Mumble_ItemMic_v2.15.44_MicFix.mcaddon')
+          protected=Path('obfuscator/addon/VC_Mumble_ItemMic_v2.15.44_protected.mcaddon')
+          for p in [readable,protected]:
+              with zipfile.ZipFile(p) as addon:
+                  assert addon.testzip() is None
+                  for entry in addon.namelist():
+                      if entry.endswith('.mcpack'):
+                          with zipfile.ZipFile(io.BytesIO(addon.read(entry))) as pack:
+                              assert pack.testzip() is None
+                              assert json.loads(pack.read('manifest.json'))['header']['version']==version
+          licenses=[(p,'licenses/'+p.name) for p in Path('.').glob('LICENSE*')]
+          wheel=Path('previous/endstone_mumble_host-0.5.5-py3-none-any.whl')
+          archive('SleepyVoiceChat-v2.15.44-OpenSource.zip',
+                  [(readable,'install/'+readable.name),(wheel,'install/'+wheel.name),
+                   ('addon','source/addon'),('src','source/src'),('pyproject.toml','source/pyproject.toml')]+licenses)
+          archive('SleepyVoiceChat-v2.15.44-Obfuscator.zip',
+                  [(protected,'install/addon/'+protected.name),('obfuscator/plugin','install/plugin'),
+                   ('obfuscator/README.md','README.md')]+licenses)
+          archive('MumbleHost-v0.5.5-Obfuscator.zip',[('obfuscator/plugin','plugin')]+licenses)
+          for p in [readable,protected,wheel,Path('previous/SleepyMumla-v0.6.4.apk')]:
+              shutil.copy2(p,out/p.name)
+          for p in out.glob('*.zip'):
+              with zipfile.ZipFile(p) as z: assert z.testzip() is None
+          (out/'SHA256SUMS.txt').write_text(''.join(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name+'\n' for p in sorted(out.iterdir())))
+          PY
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > release-notes.md <<'NOTES'
+          Addon v2.15.44 spreads periodic player maintenance across ticks, avoids redundant mic flag writes, and limits bank notifications per pass while retaining pending notifications. Microphone updates still run every tick. Bank balances, phone registration and existing world data retain their formats.
+
+          Assets:
+          - SleepyVoiceChat-v2.15.44-Obfuscator.zip: protected addon and plugin installers for installation/distribution.
+          - SleepyVoiceChat-v2.15.44-OpenSource.zip: readable addon/plugin sources and installers for maintenance.
+          - Standalone readable and protected addon files are attached.
+          - MumbleHost-v0.5.5-Obfuscator.zip preserves the protected plugin's canonical wheel filename.
+          - Plugin remains v0.5.5; Android APK remains SleepyMumla v0.6.4.
+          - SHA256SUMS.txt verifies every asset. Install one variant of each addon/plugin.
+
+          Validation: 15 addon test suites, protected artifact checksums, protected plugin tests, and archive/manifest verification. Protected addon v2.15.44 has been installed on MCSV; startup confirmed addon loading and MumbleHost running. The effect on intermittent pauses still requires testing with active players.
+          NOTES
+          gh release create addon-v2.15.44 out/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title 'Addon v2.15.44 — Staggered maintenance' --notes-file release-notes.md --latest
