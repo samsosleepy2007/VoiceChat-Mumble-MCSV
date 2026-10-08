@@ -378,11 +378,6 @@ public class Settings {
                 : android.media.AudioManager.STREAM_MUSIC;
     }
 
-    public boolean isHandsetMode() {
-        // The earpiece path was removed: voice always plays on the main speaker or a headset.
-        return false;
-    }
-
     public boolean isPttSoundEnabled() {
         return preferences.getBoolean(PREF_PTT_SOUND, DEFAULT_PTT_SOUND);
     }

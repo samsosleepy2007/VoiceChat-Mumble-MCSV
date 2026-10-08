@@ -238,6 +238,9 @@ public class ChannelListFragment extends HumlaServiceFragment implements OnChann
 
         MenuItem muteItem = menu.findItem(R.id.menu_mute_button);
         MenuItem deafenItem = menu.findItem(R.id.menu_deafen_button);
+        // Android 12+ picks a Bluetooth headset automatically through the communication
+        // device; a manual SCO switch would fight that selection.
+        menu.findItem(R.id.menu_bluetooth).setVisible(Build.VERSION.SDK_INT < 31);
 
         if(getService() != null && getService().isConnected()) {
             IHumlaSession session = getService().HumlaSession();

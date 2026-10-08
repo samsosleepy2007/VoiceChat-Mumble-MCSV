@@ -516,8 +516,6 @@ public class AudioHandler extends HumlaNetworkListener implements AudioInput.Aud
     }
 
     private volatile long mLocalTestMuteUntil;
-    public void setAudioOutputPolicy(String policy) { mVcSpeakerRoute.setPolicy(policy); }
-    public android.media.AudioDeviceInfo[] getAudioOutputDevices() { return mVcSpeakerRoute.getDevices(); }
     public android.media.AudioDeviceInfo getRoutedAudioDevice() { return mOutput.getRoutedDevice(); }
     public String getAudioRouteStatus() { return mVcSpeakerRoute.getStatus(); }
     public boolean startAudioTest() {

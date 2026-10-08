@@ -24,7 +24,6 @@ import android.util.Log;
  * phones that uses both the earpiece and the loudspeaker; it is kept as a fallback.
  */
 public final class SpeakerAudioRoute {
-    public static final String PREF_OUTPUT = "vc_audio_output";
     public static final String MODE_CALL = "call";
     public static final String MODE_MEDIA = "media";
     private static final String TAG = "SleepyMumlaAudioRoute";
@@ -78,11 +77,6 @@ public final class SpeakerAudioRoute {
         return !wiredHeadset && !bluetoothSco;
     }
 
-    public synchronized AudioDeviceInfo[] getDevices() {
-        if (Build.VERSION.SDK_INT >= 23) return manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS);
-        return new AudioDeviceInfo[0];
-    }
-
     /** Selects the route before the track exists, so playback opens on the right output. */
     public synchronized void start() {
         if (started || closed) return;
@@ -103,9 +97,6 @@ public final class SpeakerAudioRoute {
         }
         update();
     }
-
-    /** Output selection was removed with the earpiece path; kept so callers stay compatible. */
-    public synchronized void setPolicy(String value) { }
 
     public synchronized void attach(AudioTrack output) {
         track = output;

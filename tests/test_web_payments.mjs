@@ -43,8 +43,8 @@ const expired=await store.checkout('user-c','server-d',10000);await db.query("UP
 const newer=await store.checkout('user-c','server-d',10000);assert.notEqual(newer.id,expired.id);
 const sameRef=await store.checkout('user-d','server-e',10000);await assert.rejects(payOrder('user-d',{...body,orderId:sameRef.id,image:differentImage(2)},store,config,providers),e=>e.uncertain);assert(!await store.entitled('user-d','server-e'));
 process.env.PAYMENTS_ENABLED='true';await assert.rejects(requirePayment('user','server'),e=>e.code==='payment_unavailable');delete process.env.PAYMENTS_ENABLED;
-await store.installed('user-a','server-a');assert(!await store.entitled('user-a','server-a'));const replacement=await store.checkout('user-a','server-a',10000);assert.notEqual(replacement.id,o.id);assert.equal(replacement.status,'pending');
-assert.equal((await payOrder('user-a',{orderId:replacement.id,method:'promptpay',image:differentImage(3)},store,config,{checkSlip:async()=>({reference:'slip:replacement',amount:10000})})).paid,true);assert(await store.entitled('user-a','server-a'));
+// One payment per server: installing keeps the entitlement, so a reinstall needs no new order.
+await store.installed('user-a','server-a');assert(await store.entitled('user-a','server-a'));assert.equal((await store.checkout('user-a','server-a',10000)).status,'paid');assert(!await store.entitled('user-b','server-a'));
 await db.close();console.log('PASS payments: SlipOK log/amount/account errors, old slips, TrueMoney slip upload, shared SlipOK validation and cross-channel replay prevention, SQL duplicate protection, ownership, retries, expiry, ambiguous recovery and fail-closed configuration');
 
 const legacy=new PGlite();const schema=await readFile(new URL('../web/join/lib/payment-schema.sql',import.meta.url),'utf8');await legacy.exec(schema.replace(',installed_at timestamptz',''));
