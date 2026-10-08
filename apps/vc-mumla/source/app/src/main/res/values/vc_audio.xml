@@ -12,4 +12,19 @@
     <string name="vc_audio_unavailable">Saved device disconnected (using automatic)</string>
     <string name="vc_audio_connect_first">Connect to a voice server to test the live output.</string>
     <string name="vc_audio_unknown">No active audio route reported. Play the test to check.</string>
+    <string name="vc_speaker_channel">Speaker channel</string>
+    <string name="vc_speaker_channel_summary">For phones whose earpiece is a second speaker. Pick a channel, press Test audio, and switch if sound still comes from the top. Choose while holding the phone the way you play.</string>
+    <string name="vc_speaker_both">Both speakers</string>
+    <string name="vc_speaker_left">Left channel only</string>
+    <string name="vc_speaker_right">Right channel only</string>
+    <string-array name="vc_speaker_channel_values" translatable="false">
+        <item>both</item>
+        <item>left</item>
+        <item>right</item>
+    </string-array>
+    <string-array name="vc_speaker_channel_names">
+        <item>@string/vc_speaker_both</item>
+        <item>@string/vc_speaker_left</item>
+        <item>@string/vc_speaker_right</item>
+    </string-array>
 </resources>

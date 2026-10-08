@@ -67,6 +67,10 @@ public class AudioOutput implements Runnable, AudioOutputSpeech.TalkStateListene
     private final IAudioMixer<float[], short[]> mMixer;
     private ExecutorService mDecodeExecutorService;
     private long mVcLastGainLogMs = 0L; // VC_GAIN_DIAGNOSTIC
+    // Stereo-speaker phones use the earpiece as the second speaker; feeding one channel only
+    // keeps voice on the main speaker. Values: "both", "left", "right".
+    public static final String CHANNEL_BOTH = "both", CHANNEL_LEFT = "left", CHANNEL_RIGHT = "right";
+    private volatile String mChannel = CHANNEL_BOTH;
 
     public AudioOutput(AudioOutputListener listener) {
         mListener = listener;
@@ -77,6 +81,16 @@ public class AudioOutput implements Runnable, AudioOutputSpeech.TalkStateListene
     }
 
     public void setRoute(SpeakerAudioRoute route) { mRoute = route; }
+    public void setOutputChannel(String channel) { mChannel = channel == null ? CHANNEL_BOTH : channel; }
+
+    /** Writes mono samples as interleaved stereo, silencing the unselected channel. */
+    public static void toStereo(short[] mono, int count, String channel, short[] out) {
+        boolean left = !CHANNEL_RIGHT.equals(channel), right = !CHANNEL_LEFT.equals(channel);
+        for (int i = 0; i < count; i++) {
+            out[2 * i] = left ? mono[i] : 0;
+            out[2 * i + 1] = right ? mono[i] : 0;
+        }
+    }
     public synchronized android.media.AudioDeviceInfo getRoutedDevice() {
         return mRoute == null ? null : mRoute.getRoutedDevice();
     }
@@ -96,8 +110,9 @@ public class AudioOutput implements Runnable, AudioOutputSpeech.TalkStateListene
             return null;
 
         int minBufferSize = AudioTrack.getMinBufferSize(AudioHandler.SAMPLE_RATE,
-                AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT);
-        mBufferSize = Math.max((minBufferSize + 1) / 2, AudioHandler.FRAME_SIZE * 2);
+                AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT);
+        // mBufferSize counts mono samples; the stereo track needs 4 bytes per mono sample.
+        mBufferSize = Math.max((minBufferSize + 3) / 4, AudioHandler.FRAME_SIZE * 2);
         Log.v(TAG, "Using buffer size " + mBufferSize + ", system's min buffer size: " + minBufferSize);
 
         try {
@@ -111,18 +126,18 @@ public class AudioOutput implements Runnable, AudioOutputSpeech.TalkStateListene
                                 .build())
                         .setAudioFormat(new AudioFormat.Builder()
                                 .setSampleRate(AudioHandler.SAMPLE_RATE)
-                                .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                                .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
                                 .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                                 .build())
-                        .setBufferSizeInBytes(mBufferSize * 2) // Capacity is bytes; the mixer counts PCM16 samples.
+                        .setBufferSizeInBytes(mBufferSize * 4) // Capacity is bytes: stereo PCM16 per mono sample.
                         .setTransferMode(AudioTrack.MODE_STREAM)
                         .build();
             } else {
                 mAudioTrack = new AudioTrack(audioStream,
                         AudioHandler.SAMPLE_RATE,
-                        AudioFormat.CHANNEL_OUT_MONO,
+                        AudioFormat.CHANNEL_OUT_STEREO,
                         AudioFormat.ENCODING_PCM_16BIT,
-                        mBufferSize * 2, // AudioTrack capacity is bytes; the mixer counts PCM16 samples.
+                        mBufferSize * 4, // AudioTrack capacity is bytes: stereo PCM16 per mono sample.
                         AudioTrack.MODE_STREAM);
             }
         } catch (IllegalArgumentException | UnsupportedOperationException e) {
@@ -176,10 +191,14 @@ public class AudioOutput implements Runnable, AudioOutputSpeech.TalkStateListene
         if (mRoute != null) mRoute.onPlaybackStarted();
 
         final short[] mix = new short[mBufferSize];
+        final short[] stereo = new short[mBufferSize * 2];
 
         while(mRunning) {
             if(fetchAudio(mix, 0, mBufferSize)) {
-                mAudioTrack.write(mix, 0, mBufferSize);
+                // Headsets keep both ears; the channel choice only applies to the phone speakers.
+                String channel = mRoute == null || mRoute.isPhoneSpeaker() ? mChannel : CHANNEL_BOTH;
+                toStereo(mix, mBufferSize, channel, stereo);
+                mAudioTrack.write(stereo, 0, stereo.length);
             } else {
                 Log.v(TAG, "Pausing thread.");
                 synchronized (mInactiveLock) {

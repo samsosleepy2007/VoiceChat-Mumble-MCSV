@@ -25,6 +25,7 @@ public final class SpeakerAudioRoute {
     private AudioTrack.OnRoutingChangedListener trackListener;
     private AudioTrack track;
     private boolean closed;
+    private volatile int routedType;
     private String status = "mode=" + MODE + " actualType=unknown";
 
     public SpeakerAudioRoute(AudioManager manager) { this.manager = manager; }
@@ -61,10 +62,17 @@ public final class SpeakerAudioRoute {
 
     public synchronized String getStatus() { return status; }
 
+    /** True for the built-in speaker, or while the route is still unknown. */
+    public boolean isPhoneSpeaker() {
+        int type = routedType;
+        return type == 0 || type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER;
+    }
+
     private synchronized void update() {
         if (closed) return;
         AudioDeviceInfo actual = getRoutedDevice();
-        status = statusLine(actual == null ? 0 : actual.getType());
+        routedType = actual == null ? 0 : actual.getType();
+        status = statusLine(routedType);
         Log.i(TAG, status);
     }
 

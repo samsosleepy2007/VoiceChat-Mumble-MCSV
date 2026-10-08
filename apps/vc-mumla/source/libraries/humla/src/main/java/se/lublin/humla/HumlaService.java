@@ -1266,6 +1266,9 @@ public class HumlaService extends Service implements IHumlaService, IHumlaSessio
     @Override public int getAudioOutputStream() {
         return mAudioHandler == null ? AudioManager.STREAM_MUSIC : mAudioHandler.getAudioStream();
     }
+    @Override public void setSpeakerChannel(String channel) {
+        if (mAudioHandler != null) mAudioHandler.setSpeakerChannel(channel);
+    }
     @Override public void setAudioOutputPolicy(String policy) {
         if (mAudioHandler != null) mAudioHandler.setAudioOutputPolicy(policy);
     }

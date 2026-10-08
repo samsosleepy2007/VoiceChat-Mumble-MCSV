@@ -33,6 +33,14 @@
         android:title="@string/vc_audio_output"
         android:defaultValue="auto"
         app:iconSpaceReserved="false"/>
+    <ListPreference
+        android:key="vc_speaker_channel"
+        android:title="@string/vc_speaker_channel"
+        android:summary="@string/vc_speaker_channel_summary"
+        android:entries="@array/vc_speaker_channel_names"
+        android:entryValues="@array/vc_speaker_channel_values"
+        android:defaultValue="both"
+        app:iconSpaceReserved="false"/>
     <Preference
         android:key="vc_audio_actual"
         android:title="@string/vc_audio_actual"

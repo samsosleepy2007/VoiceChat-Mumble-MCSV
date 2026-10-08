@@ -416,6 +416,9 @@ public class MumlaService extends HumlaService implements
         Bundle changedExtras = new Bundle();
         boolean requiresReconnect = false;
         switch (key) {
+            case "vc_speaker_channel":
+                setSpeakerChannel(sharedPreferences.getString(key, "both"));
+                return;
             case "vc_audio_output":
                 setAudioOutputPolicy(sharedPreferences.getString(key, "auto"));
                 return;

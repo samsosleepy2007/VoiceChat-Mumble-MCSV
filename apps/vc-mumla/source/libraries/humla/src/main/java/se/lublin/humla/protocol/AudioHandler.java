@@ -66,6 +66,7 @@ public class AudioHandler extends HumlaNetworkListener implements AudioInput.Aud
     private int mVcPreviousAudioMode = AudioManager.MODE_NORMAL; // VC_AEC_AUDIO_MODE
     private boolean mVcCommunicationModeActive = false;
     private SpeakerAudioRoute mVcSpeakerRoute;
+    public static final String PREF_SPEAKER_CHANNEL = "vc_speaker_channel";
     private final AudioInput mInput;
     private final AudioOutput mOutput;
     private AudioOutput.AudioOutputListener mOutputListener;
@@ -149,6 +150,8 @@ public class AudioHandler extends HumlaNetworkListener implements AudioInput.Aud
         }
         mOutput = new AudioOutput(mOutputListener);
         mOutput.setRoute(mVcSpeakerRoute);
+        mOutput.setOutputChannel(context.getSharedPreferences(context.getPackageName() + "_preferences", 0)
+                .getString(PREF_SPEAKER_CHANNEL, AudioOutput.CHANNEL_BOTH));
     }
 
     /**
@@ -510,6 +513,7 @@ public class AudioHandler extends HumlaNetworkListener implements AudioInput.Aud
 
     private volatile long mLocalTestMuteUntil;
     public void setAudioOutputPolicy(String policy) { mVcSpeakerRoute.setPolicy(policy); }
+    public void setSpeakerChannel(String channel) { mOutput.setOutputChannel(channel); }
     public android.media.AudioDeviceInfo[] getAudioOutputDevices() { return mVcSpeakerRoute.getDevices(); }
     public android.media.AudioDeviceInfo getRoutedAudioDevice() { return mOutput.getRoutedDevice(); }
     public String getAudioRouteStatus() { return mVcSpeakerRoute.getStatus(); }
