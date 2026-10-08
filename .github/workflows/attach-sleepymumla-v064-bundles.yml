@@ -1,0 +1,87 @@
+name: Attach open source and obfuscator addon-plugin bundles
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  attach:
+    if: contains(github.event.head_commit.message, '[attach-v064-bundles]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: c07b30cc67cdfb7bd267806c622844076a449ba3
+          path: readable
+      - uses: actions/checkout@v4
+        with:
+          ref: 65cb06a8b816f0b96463485ec5065d3540303695
+          path: protected
+      - name: Download matching readable installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p out open-install
+          gh release download addon-v2.15.43 --repo "$GITHUB_REPOSITORY" --pattern 'VC_Mumble_ItemMic_v2.15.43_MicFix.mcaddon' --pattern 'endstone_mumble_host-0.5.5-py3-none-any.whl' --dir open-install
+          echo 'd86d9715af7d583196c95d986c9d6563c94094138354db47ee21b2a2d99e7f96  open-install/VC_Mumble_ItemMic_v2.15.43_MicFix.mcaddon' | sha256sum --check
+          echo '9fef76a0b80ddf547582d388beb7b3aa12ba738761c5347e68c6afbdd39c57c4  open-install/endstone_mumble_host-0.5.5-py3-none-any.whl' | sha256sum --check
+          (cd protected/obfuscator && sha256sum --check SHA256SUMS.txt)
+      - name: Package distinct installers and source bundles
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import zipfile, shutil, hashlib
+          out=Path('out')
+          def archive(name, entries):
+              with zipfile.ZipFile(out/name,'w',zipfile.ZIP_DEFLATED) as z:
+                  for source, target in entries:
+                      source=Path(source)
+                      if source.is_dir():
+                          for p in sorted(source.rglob('*')):
+                              if p.is_file() and '__pycache__' not in p.parts:
+                                  z.write(p,str(Path(target)/p.relative_to(source)))
+                      else:
+                          z.write(source,target)
+          licenses=[(p,'licenses/'+p.name) for p in Path('readable').glob('LICENSE*')]
+          sources=[('readable/addon','source/addon'),('readable/src','source/src'),
+                   ('readable/pyproject.toml','source/pyproject.toml')]
+          sources += [(p,'source/'+p.name) for p in Path('readable').glob('README*')]
+          archive('SleepyVoiceChat-v2.15.43-OpenSource.zip',
+                  [('open-install','install')]+sources+licenses)
+          protected_licenses=[(p,'licenses/'+p.name) for p in Path('protected').glob('LICENSE*')]
+          archive('SleepyVoiceChat-v2.15.43-Obfuscator.zip',
+                  [('protected/obfuscator/addon/VC_Mumble_ItemMic_v2.15.43_protected.mcaddon','install/addon/VC_Mumble_ItemMic_v2.15.43_protected.mcaddon'),
+                   ('protected/obfuscator/plugin','install/plugin'),
+                   ('protected/obfuscator/README.md','README.md')]+protected_licenses)
+          archive('MumbleHost-v0.5.5-Obfuscator.zip',
+                  [('protected/obfuscator/plugin','plugin')]+protected_licenses)
+          for p in Path('open-install').iterdir(): shutil.copy2(p,out/p.name)
+          p=Path('protected/obfuscator/addon/VC_Mumble_ItemMic_v2.15.43_protected.mcaddon')
+          shutil.copy2(p,out/p.name)
+          # Verify archives before upload. Preserve the canonical wheel filename inside ZIPs.
+          for p in out.iterdir():
+              if p.suffix in ('.zip','.whl','.mcaddon'):
+                  with zipfile.ZipFile(p) as z: assert z.testzip() is None,p
+          hashes=''.join(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name+'\n' for p in sorted(out.iterdir()))
+          (out/'SHA256SUMS-addon-plugin-v0.6.4.txt').write_text(hashes)
+          PY
+      - name: Attach bundles and explain the variants
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload sleepymumla-v0.6.4 out/* --repo "$GITHUB_REPOSITORY" --clobber
+          gh release view sleepymumla-v0.6.4 --repo "$GITHUB_REPOSITORY" --json body --jq .body > release-notes.md
+          cat >> release-notes.md <<'NOTES'
+
+          ## Addon and plugin (both variants)
+          - SleepyVoiceChat-v2.15.43-OpenSource.zip: readable addon BP/RP and plugin source, plus addon 2.15.43 and plugin 0.5.5 installers.
+          - SleepyVoiceChat-v2.15.43-Obfuscator.zip: protected addon and plugin installers, licenses and installation notes.
+          - Standalone readable .mcaddon and .whl files are also attached.
+          - The protected plugin is in MumbleHost-v0.5.5-Obfuscator.zip to preserve its valid wheel filename.
+          - Install one variant of each addon/plugin. Use the protected variant for distribution; use readable sources for maintenance.
+          - SHA256SUMS-addon-plugin-v0.6.4.txt verifies these additional assets.
+
+          Both variants use addon 2.15.43 and plugin 0.5.5. The Android APK remains unchanged.
+          NOTES
+          gh release edit sleepymumla-v0.6.4 --repo "$GITHUB_REPOSITORY" --notes-file release-notes.md
