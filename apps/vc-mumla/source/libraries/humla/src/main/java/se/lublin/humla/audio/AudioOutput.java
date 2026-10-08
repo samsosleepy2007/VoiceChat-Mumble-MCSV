@@ -280,6 +280,7 @@ public class AudioOutput implements Runnable, AudioOutputSpeech.TalkStateListene
                 } catch (NativeAudioException e) {
                     Log.v(TAG, "Failed to create audio user " + user.getName());
                     e.printStackTrace();
+                    mPacketLock.unlock(); // Otherwise the playback thread blocks forever in fetchAudio.
                     return;
                 }
                 Log.v(TAG, "Created audio user " + user.getName());

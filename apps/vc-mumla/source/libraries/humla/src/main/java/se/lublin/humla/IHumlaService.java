@@ -36,8 +36,6 @@ import se.lublin.humla.util.IHumlaObserver;
  */
 public interface IHumlaService {
     int getAudioOutputStream();
-    void setAudioOutputPolicy(String policy);
-    android.media.AudioDeviceInfo[] getAudioOutputDevices();
     android.media.AudioDeviceInfo getRoutedAudioDevice();
     String getAudioRouteStatus();
     boolean startAudioTest();

@@ -930,7 +930,7 @@ public class MumlaActivity extends AppCompatActivity implements ListView.OnItemC
             case Settings.PREF_STAY_AWAKE:
                 setStayAwake(mSettings.shouldStayAwake());
                 break;
-            case Settings.PREF_HANDSET_MODE:
+            case Settings.PREF_VOICE_MODE:
                 setVolumeControlStream(mSettings.getVoiceAudioStream());
                 break;
         }

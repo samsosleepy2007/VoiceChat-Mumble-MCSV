@@ -1,4 +1,4 @@
-name: SleepyMumla v0.6.8 main speaker only
+name: SleepyMumla v0.6.9 main speaker only
 on:
   push:
     branches: [fix/app-single-speaker]
@@ -30,18 +30,18 @@ jobs:
           python3 - <<'PYBUILD'
           from pathlib import Path
           p = Path('app/build.gradle')
-          p.write_text(p.read_text().replace('applicationId "se.lublin.mumla.beta"', 'applicationId "se.lublin.mumla.webjoin"').replace('versionName gitDescribe', 'versionName "0.6.8"'))
+          p.write_text(p.read_text().replace('applicationId "se.lublin.mumla.beta"', 'applicationId "se.lublin.mumla.webjoin"').replace('versionName gitDescribe', 'versionName "0.6.9"'))
           PYBUILD
           chmod +x gradlew
           ./gradlew :libraries:humla:testDebugUnitTest :app:testBetaDebugUnitTest :app:assembleBetaDebug --no-daemon --stacktrace
           mkdir -p "$GITHUB_WORKSPACE/out"
-          cp app/build/outputs/apk/beta/debug/*.apk "$GITHUB_WORKSPACE/out/SleepyMumla-v0.6.8.apk"
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$GITHUB_WORKSPACE/out/SleepyMumla-v0.6.8.apk" | tee "$GITHUB_WORKSPACE/out/APK-signature.txt"
-          (cd "$GITHUB_WORKSPACE/out" && sha256sum *.apk > SHA256SUMS-v0.6.8.txt)
+          cp app/build/outputs/apk/beta/debug/*.apk "$GITHUB_WORKSPACE/out/SleepyMumla-v0.6.9.apk"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$GITHUB_WORKSPACE/out/SleepyMumla-v0.6.9.apk" | tee "$GITHUB_WORKSPACE/out/APK-signature.txt"
+          (cd "$GITHUB_WORKSPACE/out" && sha256sum *.apk > SHA256SUMS-v0.6.9.txt)
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: SleepyMumla-v0.6.8
+          name: SleepyMumla-v0.6.9
           path: |
             out/*
             apps/vc-mumla/source/libraries/humla/build/test-results/**/*.xml
@@ -50,5 +50,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete sleepymumla-v0.6.8 --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
-          gh release create sleepymumla-v0.6.8 out/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title 'SleepyMumla v0.6.8 — Phone call mode: bottom speaker only' --notes 'Voice now plays like a phone call on speakerphone by default, so phones with a stereo earpiece (such as the OPPO Reno12 F) use the bottom speaker only. Wired, USB and Bluetooth headsets are still picked automatically; the earpiece is never used. Settings → Audio → Voice mode switches back to Media (stereo) if call mode is too quiet on your phone. Volume buttons now adjust call volume in Phone call mode. The left/right Speaker channel option from 0.6.7 was removed. Debug build: uninstall the previous version first if Android refuses to update. Plugin and addon unchanged.' --prerelease
+          gh release delete sleepymumla-v0.6.9 --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release create sleepymumla-v0.6.9 out/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title 'SleepyMumla v0.6.9 — Speaker fix cleanup' --notes 'Keeps the 0.6.8 Phone call mode (bottom speaker only). Volume buttons now follow Settings → Audio → Voice mode right away. On Android 12 and later the manual Bluetooth menu is hidden because Bluetooth headsets are picked automatically. Fixed a rare case where all incoming voice went silent until reconnecting after a decoder failed to start. Removed the unused output picker and handset-mode code. Debug build: uninstall the previous version first if Android refuses to update. Plugin and addon unchanged.' --prerelease

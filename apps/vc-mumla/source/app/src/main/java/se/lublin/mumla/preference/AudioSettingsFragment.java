@@ -38,16 +38,8 @@ public class AudioSettingsFragment extends MumlaPreferenceFragment {
     public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
         Settings.getInstance(requireContext());
         setPreferencesFromResource(R.xml.settings_audio, rootKey);
-        outputPreference = findPreference("vc_audio_output");
         actualPreference = findPreference("vc_audio_actual");
         testPreference = findPreference("vc_audio_test");
-        outputPreference.setSummaryProvider(ListPreference.SimpleSummaryProvider.getInstance());
-        // Voice always uses the main speaker or a connected headset; there is nothing to choose.
-        outputPreference.setVisible(false);
-        outputPreference.setOnPreferenceChangeListener((preference, value) -> {
-            if (service != null) service.setAudioOutputPolicy((String) value);
-            return true;
-        });
         testPreference.setOnPreferenceClickListener(preference -> {
             if (service != null) {
                 if (service.isAudioTestPlaying()) service.stopAudioTest();
@@ -90,7 +82,6 @@ public class AudioSettingsFragment extends MumlaPreferenceFragment {
         updateAudioDependents(getPreferenceScreen(), inputPreference.getValue());
     }
 
-    private ListPreference outputPreference;
     private Preference actualPreference, testPreference;
     private IHumlaService service;
     private boolean bound;
@@ -147,25 +138,9 @@ public class AudioSettingsFragment extends MumlaPreferenceFragment {
     }
 
     private void refreshAudio() {
-        if (!isAdded() || outputPreference == null) return;
+        if (!isAdded() || actualPreference == null) return;
         boolean connected = service != null && service.isConnected();
         if (connected) requireActivity().setVolumeControlStream(service.getAudioOutputStream());
-        List<CharSequence> names = new ArrayList<>();
-        List<CharSequence> values = new ArrayList<>();
-        names.add(getString(R.string.vc_audio_auto)); values.add("auto");
-        names.add(getString(R.string.vc_audio_speaker)); values.add(Integer.toString(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER));
-        if (connected && Build.VERSION.SDK_INT >= 23) {
-            for (AudioDeviceInfo device : service.getAudioOutputDevices()) {
-                String value = Integer.toString(device.getType());
-                if (!values.contains(value)) { names.add(deviceName(device)); values.add(value); }
-            }
-        }
-        String saved = outputPreference.getValue();
-        if (saved != null && !values.contains(saved)) {
-            names.add(getString(R.string.vc_audio_unavailable)); values.add(saved);
-        }
-        outputPreference.setEntries(names.toArray(new CharSequence[0]));
-        outputPreference.setEntryValues(values.toArray(new CharSequence[0]));
         testPreference.setEnabled(connected);
         boolean playing = connected && service.isAudioTestPlaying();
         testPreference.setTitle(playing ? R.string.vc_audio_stop : R.string.vc_audio_test);

@@ -27,7 +27,6 @@ import android.os.Binder;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
-import android.os.PowerManager;
 import android.speech.tts.TextToSpeech;
 import android.util.Log;
 import android.widget.Toast;
@@ -66,8 +65,6 @@ public class MumlaService extends HumlaService implements
         MumlaReconnectNotification.OnActionListener, IMumlaService {
     private static final String TAG = MumlaService.class.getName();
 
-    /** Undocumented constant that permits a proximity-sensing wake lock. */
-    public static final int PROXIMITY_SCREEN_OFF_WAKE_LOCK = 32;
     public static final int TTS_THRESHOLD = 250; // Maximum number of characters to read
     public static final int RECONNECT_DELAY = 10000;
 
@@ -77,8 +74,6 @@ public class MumlaService extends HumlaService implements
     private MumlaReconnectNotification mReconnectNotification;
     /** Channel view overlay. */
     private MumlaOverlay mChannelOverlay;
-    /** Proximity lock for handset mode. */
-    private PowerManager.WakeLock mProximityLock;
     /** Play sound when push to talk key is pressed */
     private boolean mPTTSoundEnabled;
     /** Try to shorten spoken messages when using TTS */
@@ -382,10 +377,6 @@ public class MumlaService extends HumlaService implements
         if (mSettings.isHotCornerEnabled()) {
             mHotCorner.setShown(true);
         }
-        // Configure proximity sensor
-        if (mSettings.isHandsetMode()) {
-            setProximitySensorOn(true);
-        }
     }
 
     @Override
@@ -400,8 +391,6 @@ public class MumlaService extends HumlaService implements
         mChannelOverlay.hide();
 
         mHotCorner.setShown(false);
-
-        setProximitySensorOn(false);
 
         clearMessageLog();
         mMessageNotification.dismiss();
@@ -420,18 +409,11 @@ public class MumlaService extends HumlaService implements
                 // Reloads the audio handler with the new mode while connected.
                 changedExtras.putInt(HumlaService.EXTRAS_AUDIO_STREAM, mSettings.getVoiceAudioStream());
                 break;
-            case "vc_audio_output":
-                setAudioOutputPolicy(sharedPreferences.getString(key, "auto"));
-                return;
             case Settings.PREF_INPUT_METHOD:
                 /* Convert input method defined in settings to an integer format used by Humla. */
                 int inputMethod = mSettings.getHumlaInputMethod();
                 changedExtras.putInt(HumlaService.EXTRAS_TRANSMIT_MODE, inputMethod);
                 mChannelOverlay.setPushToTalkShown(inputMethod == Constants.TRANSMIT_PUSH_TO_TALK);
-                break;
-            case Settings.PREF_HANDSET_MODE:
-                setProximitySensorOn(isConnectionEstablished() && mSettings.isHandsetMode());
-                changedExtras.putInt(HumlaService.EXTRAS_AUDIO_STREAM, mSettings.getVoiceAudioStream());
                 break;
             case Settings.PREF_THRESHOLD:
                 changedExtras.putFloat(HumlaService.EXTRAS_DETECTION_THRESHOLD,
@@ -498,17 +480,6 @@ public class MumlaService extends HumlaService implements
 
         if (requiresReconnect && isConnectionEstablished()) {
             Toast.makeText(this, R.string.change_requires_reconnect, Toast.LENGTH_LONG).show();
-        }
-    }
-
-    private void setProximitySensorOn(boolean on) {
-        if(on) {
-            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
-            mProximityLock = pm.newWakeLock(PROXIMITY_SCREEN_OFF_WAKE_LOCK, "Mumla:Proximity");
-            mProximityLock.acquire();
-        } else {
-            if(mProximityLock != null) mProximityLock.release();
-            mProximityLock = null;
         }
     }
 
