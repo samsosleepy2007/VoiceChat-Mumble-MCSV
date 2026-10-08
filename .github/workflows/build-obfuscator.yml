@@ -15,6 +15,8 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - run: npm ci --prefix tools/obfuscation --ignore-scripts --no-audit --no-fund
+      - run: |
+          for test in tests/test_{atm,atm_pin,bank,bank_ui,contacts_ui,deposit,mainhand_only,periodic_work,phone_calls,phone_history,phone_lock,range_preview,ringtone_preview,touchpad,transfer}.mjs; do node "$test"; done
       - run: python3 tools/build_obfuscated.py
       - run: node --input-type=module --check < obfuscator/addon/main.protected.js
       - run: node tools/obfuscation/verify.mjs

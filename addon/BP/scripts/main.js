@@ -326,8 +326,8 @@ function reassertMicFlags(player) {
         const item = inv.getItem(i);
         if (!item || !isMicId(item.typeId)) continue;
         const slot = inv.getSlot(i);
-        slot.lockMode = ItemLockMode.inventory;
-        slot.keepOnDeath = true;
+        if (slot.lockMode !== ItemLockMode.inventory) slot.lockMode = ItemLockMode.inventory;
+        if (!slot.keepOnDeath) slot.keepOnDeath = true;
       } catch {}
     }
   }
@@ -1315,30 +1315,45 @@ function transferBankMoney(player, sourceNumber, targetNumber, amount, authorize
   try { player.playSound("sleepybank.pay_success", { volume: 1, pitch: 1 }); } catch {}
   return { row };
 }
-function deliverBankNotifications() {
-  for (const player of world.getPlayers()) {
-    const inv = inventory(player);
-    const seen = new Set();
-    if (!inv) continue;
-    for (let i = 0; i < inv.size; i++) {
-      const item = inv.getItem(i);
-      if (!item || !isPhoneId(item.typeId)) continue;
-      const id = String(item.getDynamicProperty(PHONE_PROP_ID) ?? "");
-      const account = readBankAccount(id);
-      if (!account || seen.has(account.number)) continue;
-      seen.add(account.number);
-      const key = "sleepybank:pending:" + account.number;
-      const pending = readPhoneHistoryStore(key);
-      if (!pending.length) continue;
-      // Clear delivered batch so moving the phone cannot replay old notifications.
-      writePhoneHistoryStore(key, []);
-      for (const row of pending) {
-        player.sendMessage(`§b[ SleepyBank ]§r §fคุณได้รับเงินจำนวน §a${row.amount}§f จาก §b${row.senderName}§r`);
-        try { player.playSound("sleepybank.receive", { volume: 1, pitch: 1 }); } catch {}
-      }
+const bankNotificationCursor = new Map();
+function deliverBankNotificationsForPlayer(player) {
+  const inv = inventory(player);
+  if (!inv) return;
+  const accounts = new Map();
+  for (let i = 0; i < inv.size; i++) {
+    const item = inv.getItem(i);
+    if (!item || !isPhoneId(item.typeId)) continue;
+    const id = String(item.getDynamicProperty(PHONE_PROP_ID) ?? "");
+    const account = readBankAccount(id);
+    if (account) accounts.set(account.number, account);
+  }
+  const numbers = [...accounts.keys()];
+  if (!numbers.length) { bankNotificationCursor.delete(player.id); return; }
+  let start = numbers.indexOf(bankNotificationCursor.get(player.id));
+  if (start < 0) start = 0;
+  let remaining = 4;
+  for (let offset = 0; offset < numbers.length; offset++) {
+    const index = (start + offset) % numbers.length;
+    const key = "sleepybank:pending:" + numbers[index];
+    const pending = readPhoneHistoryStore(key);
+    if (!pending.length) continue;
+    // Persist only the delivered batch; keep all remaining notifications on disk.
+    const batch = pending.slice(0, remaining);
+    writePhoneHistoryStore(key, pending.slice(batch.length));
+    remaining -= batch.length;
+    for (const row of batch) {
+      player.sendMessage(`§b[ SleepyBank ]§r §fคุณได้รับเงินจำนวน §a${row.amount}§f จาก §b${row.senderName}§r`);
+      try { player.playSound("sleepybank.receive", { volume: 1, pitch: 1 }); } catch {}
+    }
+    if (remaining === 0) {
+      // Rotate across phones so a busy first account cannot starve later accounts.
+      bankNotificationCursor.set(player.id, numbers[(index + 1) % numbers.length]);
+      return;
     }
   }
+  bankNotificationCursor.delete(player.id);
 }
+
 async function showBankHistory(player, number, authorize) {
   let page = 0;
   while (authorize()) {
@@ -1476,8 +1491,10 @@ async function showTouchpad(player, account, authorize) {
   return false;
 }
 system.runInterval(() => {
+  if (!touchpadReceivers.size) return;
+  const online = new Map(world.getAllPlayers().map(player => [player.id, player]));
   for (const [id, receiver] of touchpadReceivers) {
-    const player = world.getAllPlayers().find(p => p.id === id);
+    const player = online.get(id);
     if (!player) { touchpadReceivers.delete(id); continue; }
     if (!touchpadValid(player, receiver)) { stopTouchpad(player); continue; }
   }
@@ -3645,6 +3662,7 @@ world.afterEvents.playerLeave.subscribe((ev) => {
   openSettingsForms.delete(ev.playerId);
   openPhonePlayers.delete(ev.playerId);
   openAtmPlayers.delete(ev.playerId);
+  bankNotificationCursor.delete(ev.playerId);
 });
 
 // One-tick evaluation keeps Hold-to-Talk responsive and immediately mirrors
@@ -3659,23 +3677,50 @@ system.runInterval(() => {
   }
 }, 1);
 
-system.runInterval(() => {
-  for (const player of world.getAllPlayers()) {
-    try {
-      migrateLegacyItems(player);
-      ensureMic(player);
-      reassertMicFlags(player);
-      syncBankCards(player);
-      syncVoiceRangeFromServer(player);
-      const state = stateFor(player);
-      state.micKnown = hasAnyMic(player);
-      evaluate(player);
-    } catch {}
-  }
-}, 100);
+// Snapshot each cycle, then do at most one player's maintenance per tick.
+// Coalesce cycles when a previous pass is still running; never build an unbounded queue.
+function staggerPlayerWork(label, interval, getPlayers, work) {
+  let pending = [], index = 0;
+  let lastWarning = -Infinity;
+  system.runInterval(() => {
+    if (index < pending.length) return;
+    pending = getPlayers();
+    index = 0;
+  }, interval);
+  system.runInterval(() => {
+    if (index >= pending.length) return;
+    const player = pending[index++];
+    const started = Date.now();
+    try { work(player); }
+    catch (e) {
+      // A player may leave between snapshot and execution. Report errors sparingly.
+      if (system.currentTick - lastWarning >= 400) {
+        lastWarning = system.currentTick;
+        console.warn(`[VC_PERF_JS] ${label} failed: ${e}`);
+      }
+    }
+    const elapsed = Date.now() - started;
+    if (elapsed > 35 && system.currentTick - lastWarning >= 400) {
+      lastWarning = system.currentTick;
+      console.warn(`[VC_PERF_JS] ${label} duration_ms=${elapsed}`);
+    }
+    if (index >= pending.length) { pending = []; index = 0; }
+  }, 1);
+}
+
+staggerPlayerWork("inventory_maintenance", 100, () => world.getAllPlayers(), player => {
+  migrateLegacyItems(player);
+  ensureMic(player);
+  reassertMicFlags(player);
+  syncBankCards(player);
+  syncVoiceRangeFromServer(player);
+  const state = stateFor(player);
+  state.micKnown = hasAnyMic(player);
+  evaluate(player);
+});
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.15.43 — explicit touchpad animation hold"
+  "[VCMumbleItem/BP] Loaded v2.15.44 — staggered maintenance and bounded bank notifications"
 );
 
 // Verify real item registration and per-item metadata without giving test items.
@@ -3690,4 +3735,4 @@ system.run(() => {
   }
 });
 
-system.runInterval(() => { try { deliverBankNotifications(); } catch (e) { console.warn(`[SleepyBank] NOTIFY_FAILED: ${e}`); } }, 40);
+staggerPlayerWork("bank_notifications", 40, () => world.getPlayers(), deliverBankNotificationsForPlayer);
