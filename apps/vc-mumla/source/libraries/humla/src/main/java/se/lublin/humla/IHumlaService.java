@@ -37,7 +37,6 @@ import se.lublin.humla.util.IHumlaObserver;
 public interface IHumlaService {
     int getAudioOutputStream();
     void setAudioOutputPolicy(String policy);
-    void setSpeakerChannel(String channel);
     android.media.AudioDeviceInfo[] getAudioOutputDevices();
     android.media.AudioDeviceInfo getRoutedAudioDevice();
     String getAudioRouteStatus();

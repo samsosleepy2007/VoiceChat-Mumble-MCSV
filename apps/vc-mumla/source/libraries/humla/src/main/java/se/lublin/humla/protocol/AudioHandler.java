@@ -66,7 +66,6 @@ public class AudioHandler extends HumlaNetworkListener implements AudioInput.Aud
     private int mVcPreviousAudioMode = AudioManager.MODE_NORMAL; // VC_AEC_AUDIO_MODE
     private boolean mVcCommunicationModeActive = false;
     private SpeakerAudioRoute mVcSpeakerRoute;
-    public static final String PREF_SPEAKER_CHANNEL = "vc_speaker_channel";
     private final AudioInput mInput;
     private final AudioOutput mOutput;
     private AudioOutput.AudioOutputListener mOutputListener;
@@ -125,21 +124,28 @@ public class AudioHandler extends HumlaNetworkListener implements AudioInput.Aud
         mEncoderLock = new Object();
 
         int actualSource = audioSource;
-        // Play voice like media. Some phones open both the earpiece and the loudspeaker in
-        // MODE_IN_COMMUNICATION; the media path uses the main speaker only and still follows
-        // wired/USB/Bluetooth headsets automatically.
-        int actualStream = AudioManager.STREAM_MUSIC;
+        // The voice-call stream selects call mode: MODE_IN_COMMUNICATION on speakerphone, which
+        // stereo-speaker phones play from the bottom loudspeaker only. Any other stream plays
+        // voice like media, which those phones play from the earpiece and loudspeaker together.
+        boolean call = audioStream == AudioManager.STREAM_VOICE_CALL;
+        int actualStream = call ? AudioManager.STREAM_VOICE_CALL : AudioManager.STREAM_MUSIC;
+        if (call) {
+            mVcPreviousAudioMode = mAudioManager.getMode();
+            mAudioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
+            mVcCommunicationModeActive = true;
+        }
         if (echoCancellationMethod.equals("system") /* android.media.audiofx.AcousticEchoCanceler */) {
             // System AEC is attached to the capture session; it needs the voice capture source.
             actualSource = MediaRecorder.AudioSource.VOICE_COMMUNICATION;
-            Log.i(TAG, "VC-AEC audioMode=MODE_NORMAL inputSource=VOICE_COMMUNICATION outputStream=MUSIC");
         }
+        Log.i(TAG, "VC-AEC audioMode=" + (call ? "MODE_IN_COMMUNICATION" : "MODE_NORMAL")
+                + " previousMode=" + mVcPreviousAudioMode
+                + " inputSource=" + actualSource
+                + " outputStream=" + (call ? "VOICE_CALL" : "MUSIC"));
         mAudioSource = actualSource;
         mAudioStream = actualStream;
 
-        mVcSpeakerRoute = new SpeakerAudioRoute(mAudioManager);
-        mVcSpeakerRoute.setPolicy(context.getSharedPreferences(context.getPackageName() + "_preferences", 0)
-                .getString(SpeakerAudioRoute.PREF_OUTPUT, "auto"));
+        mVcSpeakerRoute = new SpeakerAudioRoute(mAudioManager, call);
         mVcSpeakerRoute.start();
 
         try {
@@ -150,8 +156,6 @@ public class AudioHandler extends HumlaNetworkListener implements AudioInput.Aud
         }
         mOutput = new AudioOutput(mOutputListener);
         mOutput.setRoute(mVcSpeakerRoute);
-        mOutput.setOutputChannel(context.getSharedPreferences(context.getPackageName() + "_preferences", 0)
-                .getString(PREF_SPEAKER_CHANNEL, AudioOutput.CHANNEL_BOTH));
     }
 
     /**
@@ -513,7 +517,6 @@ public class AudioHandler extends HumlaNetworkListener implements AudioInput.Aud
 
     private volatile long mLocalTestMuteUntil;
     public void setAudioOutputPolicy(String policy) { mVcSpeakerRoute.setPolicy(policy); }
-    public void setSpeakerChannel(String channel) { mOutput.setOutputChannel(channel); }
     public android.media.AudioDeviceInfo[] getAudioOutputDevices() { return mVcSpeakerRoute.getDevices(); }
     public android.media.AudioDeviceInfo getRoutedAudioDevice() { return mOutput.getRoutedDevice(); }
     public String getAudioRouteStatus() { return mVcSpeakerRoute.getStatus(); }
