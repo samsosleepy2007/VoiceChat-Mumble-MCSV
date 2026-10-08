@@ -36,3 +36,23 @@ html:has(body.viewport-fit){height:100%;overflow:hidden;overscroll-behavior:none
 @media(max-width:760px){.price-panel{margin-top:12px;gap:8px}.price-panel>div{padding:10px 12px;border-radius:12px}.price-panel strong{font-size:19px;margin:3px 0 2px}.price-panel small{font-size:10px}.price-panel span{font-size:10px}.install-price{font-size:11px;margin-top:8px}.install-price strong{font-size:14px}}
 @media(max-width:760px) and (max-height:650px){.price-panel>div>span:last-child{display:none}}
 @media(max-width:760px){.install-link{margin-left:0;margin-top:8px}.hero>p.install-price:not([hidden]){display:block}}
+
+/* Polish: same palette, clearer surfaces and feedback. */
+.card{position:relative;box-shadow:0 24px 70px #0003,inset 0 1px 0 #ffffff12}
+.card:before{content:'';position:absolute;inset:0 24px auto;height:1px;background:linear-gradient(90deg,transparent,#a9b9ff66,transparent);pointer-events:none}
+input{transition:border-color .18s,box-shadow .18s,background .18s}input:hover:not(:focus){border-color:#ffffff30}
+button:not(.primary):hover,a.button:not(.primary):hover{border-color:#a9b9ff55}
+.primary:hover{box-shadow:0 10px 30px #7198ff40!important;filter:brightness(1.05)}
+button.done{border-color:#2fd39a66!important;color:#a4f3cf!important;background:#2fd39a14!important}
+.price-panel>div{transition:transform .18s,border-color .18s}.price-panel>div:hover{transform:translateY(-2px);border-color:#a9b9ff40}
+.server{background:linear-gradient(135deg,#0b1730,#091224);border-color:#a9b9ff1f}.server strong{font-variant-numeric:tabular-nums;letter-spacing:.3px}
+.server-info small:before{content:'';display:inline-block;width:7px;height:7px;border-radius:50%;background:#6edbff;box-shadow:0 0 10px #6edbff;margin-right:7px;vertical-align:1px}
+/* Owner-only share panel on the join page. */
+.owner-share{margin:0 0 22px;padding:16px;border:1px solid #2fd39a45;border-radius:16px;background:linear-gradient(135deg,#2fd39a14,#26c7ff0a);animation:enter .35s ease both}
+.owner-head{display:flex;align-items:center;gap:12px}.owner-head strong{display:block;font-size:15px;color:#c9f7e3}.owner-head span{font-size:12px;color:#a8c9bd}
+.owner-badge{width:30px;height:30px;flex-shrink:0;display:grid;place-items:center;border-radius:50%;background:#2fd39a;color:#06291c;font-weight:800;box-shadow:0 0 18px #2fd39a55}
+.owner-link{display:flex;gap:8px;margin-top:12px}.owner-link input{flex:1;min-width:0;font-size:13px;padding:10px 12px}.owner-link button{flex-shrink:0;min-height:42px;padding:8px 14px;font-size:13px}
+#copy-share{background:#2fd39a!important;color:#06291c!important;border-color:transparent!important;font-weight:700}
+.owner-note{font-size:11px;color:#8fb3a6;margin:8px 0 0;line-height:1.4}.link-button{all:unset;cursor:pointer;color:#a9dfff;text-decoration:underline}.link-button:focus-visible{outline:2px solid #c7d2ff}
+@media(max-width:760px){.owner-share{margin-bottom:12px;padding:12px;border-radius:14px}.owner-head strong{font-size:14px}.owner-link button{min-height:38px;padding:6px 10px;font-size:12px}}
+@media(max-width:760px) and (max-height:650px){.join-page:has(.owner-share:not([hidden])) .hero{display:none}}
