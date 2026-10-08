@@ -12,4 +12,16 @@
     <string name="vc_audio_unavailable">Saved device disconnected (using automatic)</string>
     <string name="vc_audio_connect_first">Connect to a voice server to test the live output.</string>
     <string name="vc_audio_unknown">No active audio route reported. Play the test to check.</string>
+    <string name="vc_voice_mode">Voice mode</string>
+    <string name="vc_voice_mode_call">Phone call (bottom speaker only)</string>
+    <string name="vc_voice_mode_media">Media (stereo, can also use the top earpiece)</string>
+    <string name="vc_voice_mode_summary">%s\nIf voice is too quiet or cuts out in Phone call mode, try Media.</string>
+    <string-array name="vc_voice_mode_values" translatable="false">
+        <item>call</item>
+        <item>media</item>
+    </string-array>
+    <string-array name="vc_voice_mode_names">
+        <item>@string/vc_voice_mode_call</item>
+        <item>@string/vc_voice_mode_media</item>
+    </string-array>
 </resources>

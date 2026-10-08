@@ -33,6 +33,14 @@
         android:title="@string/vc_audio_output"
         android:defaultValue="auto"
         app:iconSpaceReserved="false"/>
+    <ListPreference
+        android:key="vc_voice_mode"
+        android:title="@string/vc_voice_mode"
+        android:summary="@string/vc_voice_mode_summary"
+        android:entries="@array/vc_voice_mode_names"
+        android:entryValues="@array/vc_voice_mode_values"
+        android:defaultValue="call"
+        app:iconSpaceReserved="false"/>
     <Preference
         android:key="vc_audio_actual"
         android:title="@string/vc_audio_actual"

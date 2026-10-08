@@ -137,6 +137,9 @@ public class Settings {
     public static final boolean DEFAULT_HALF_DUPLEX = false;
 
     public static final String PREF_HANDSET_MODE = "handset_mode";
+    /** "call": phone-call speakerphone, bottom speaker only. "media": like a music app. */
+    public static final String PREF_VOICE_MODE = "vc_voice_mode";
+    public static final String DEFAULT_VOICE_MODE = "call";
     public static final boolean DEFAULT_HANDSET_MODE = false;
 
     public static final String PREF_PTT_SOUND = "ptt_sound";
@@ -365,13 +368,19 @@ public class Settings {
         return preferences.getBoolean(PREF_HALF_DUPLEX, DEFAULT_HALF_DUPLEX);
     }
 
+    public boolean isCallVoiceMode() {
+        return !"media".equals(preferences.getString(PREF_VOICE_MODE, DEFAULT_VOICE_MODE));
+    }
+
+    /** The voice-call stream selects call mode in Humla; volume keys follow the same stream. */
     public int getVoiceAudioStream() {
-        return android.os.Build.VERSION.SDK_INT >= 31 || isHandsetMode()
-                ? android.media.AudioManager.STREAM_VOICE_CALL : android.media.AudioManager.STREAM_MUSIC;
+        return isCallVoiceMode() ? android.media.AudioManager.STREAM_VOICE_CALL
+                : android.media.AudioManager.STREAM_MUSIC;
     }
 
     public boolean isHandsetMode() {
-        return preferences.getBoolean(PREF_HANDSET_MODE, DEFAULT_HANDSET_MODE);
+        // The earpiece path was removed: voice always plays on the main speaker or a headset.
+        return false;
     }
 
     public boolean isPttSoundEnabled() {

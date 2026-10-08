@@ -124,27 +124,28 @@ public class AudioHandler extends HumlaNetworkListener implements AudioInput.Aud
         mEncoderLock = new Object();
 
         int actualSource = audioSource;
-        // Modern communication routing, including Bluetooth SCO, requires a voice stream.
-        int actualStream = android.os.Build.VERSION.SDK_INT >= 31 || bluetoothEnabled
-                ? AudioManager.STREAM_VOICE_CALL : audioStream;
-        // Routing belongs to the voice session even if hardware AEC is unavailable/disabled.
-        mVcPreviousAudioMode = mAudioManager.getMode();
-        mAudioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
-        mVcCommunicationModeActive = true;
-        if (echoCancellationMethod.equals("system") /* android.media.audiofx.AcousticEchoCanceler */) {
-            // Android's system AEC expects a communication capture context.
-            actualSource = MediaRecorder.AudioSource.VOICE_COMMUNICATION;
-            Log.i(TAG, "VC-AEC audioMode=MODE_IN_COMMUNICATION"
-                    + " previousMode=" + mVcPreviousAudioMode
-                    + " inputSource=VOICE_COMMUNICATION"
-                    + " outputStream=" + audioStream);
+        // The voice-call stream selects call mode: MODE_IN_COMMUNICATION on speakerphone, which
+        // stereo-speaker phones play from the bottom loudspeaker only. Any other stream plays
+        // voice like media, which those phones play from the earpiece and loudspeaker together.
+        boolean call = audioStream == AudioManager.STREAM_VOICE_CALL;
+        int actualStream = call ? AudioManager.STREAM_VOICE_CALL : AudioManager.STREAM_MUSIC;
+        if (call) {
+            mVcPreviousAudioMode = mAudioManager.getMode();
+            mAudioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
+            mVcCommunicationModeActive = true;
         }
+        if (echoCancellationMethod.equals("system") /* android.media.audiofx.AcousticEchoCanceler */) {
+            // System AEC is attached to the capture session; it needs the voice capture source.
+            actualSource = MediaRecorder.AudioSource.VOICE_COMMUNICATION;
+        }
+        Log.i(TAG, "VC-AEC audioMode=" + (call ? "MODE_IN_COMMUNICATION" : "MODE_NORMAL")
+                + " previousMode=" + mVcPreviousAudioMode
+                + " inputSource=" + actualSource
+                + " outputStream=" + (call ? "VOICE_CALL" : "MUSIC"));
         mAudioSource = actualSource;
         mAudioStream = actualStream;
 
-        mVcSpeakerRoute = new SpeakerAudioRoute(mAudioManager);
-        mVcSpeakerRoute.setPolicy(context.getSharedPreferences(context.getPackageName() + "_preferences", 0)
-                .getString(SpeakerAudioRoute.PREF_OUTPUT, "auto"));
+        mVcSpeakerRoute = new SpeakerAudioRoute(mAudioManager, call);
         mVcSpeakerRoute.start();
 
         try {

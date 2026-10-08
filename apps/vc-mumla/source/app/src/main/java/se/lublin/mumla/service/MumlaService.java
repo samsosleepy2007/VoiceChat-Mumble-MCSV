@@ -416,6 +416,10 @@ public class MumlaService extends HumlaService implements
         Bundle changedExtras = new Bundle();
         boolean requiresReconnect = false;
         switch (key) {
+            case Settings.PREF_VOICE_MODE:
+                // Reloads the audio handler with the new mode while connected.
+                changedExtras.putInt(HumlaService.EXTRAS_AUDIO_STREAM, mSettings.getVoiceAudioStream());
+                break;
             case "vc_audio_output":
                 setAudioOutputPolicy(sharedPreferences.getString(key, "auto"));
                 return;
@@ -427,8 +431,7 @@ public class MumlaService extends HumlaService implements
                 break;
             case Settings.PREF_HANDSET_MODE:
                 setProximitySensorOn(isConnectionEstablished() && mSettings.isHandsetMode());
-                changedExtras.putInt(HumlaService.EXTRAS_AUDIO_STREAM, mSettings.isHandsetMode() ?
-                                     AudioManager.STREAM_VOICE_CALL : AudioManager.STREAM_MUSIC);
+                changedExtras.putInt(HumlaService.EXTRAS_AUDIO_STREAM, mSettings.getVoiceAudioStream());
                 break;
             case Settings.PREF_THRESHOLD:
                 changedExtras.putFloat(HumlaService.EXTRAS_DETECTION_THRESHOLD,
