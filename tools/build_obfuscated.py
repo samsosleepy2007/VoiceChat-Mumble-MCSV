@@ -47,12 +47,12 @@ def main():
                     inner.writestr(name,data)
             outer.writestr(f'SleepyMumla_{pack}.mcpack',buf.getvalue())
     # Retain portable Python wheel and entry points; rebuild RECORD after transformations.
-    wheel=out/'plugin'/'endstone_mumble_host-0.6.0-py3-none-any.whl'
-    dist='endstone_mumble_host-0.6.0.dist-info';files={}
+    wheel=out/'plugin'/'endstone_mumble_host-0.6.1-py3-none-any.whl'
+    dist='endstone_mumble_host-0.6.1.dist-info';files={}
     for path in sorted((ROOT/'src/endstone_mumble_host').rglob('*')):
         if path.is_file() and '__pycache__' not in path.parts:
             name=path.relative_to(ROOT/'src').as_posix();data=path.read_bytes();files[name]=protect_python(data.decode(), name) if path.suffix=='.py' else data
-    files[dist+'/METADATA']=b'Metadata-Version: 2.1\nName: endstone-mumble-host\nVersion: 0.6.0\nRequires-Python: >=3.11\nRequires-Dist: endstone>=0.11.0\n'
+    files[dist+'/METADATA']=b'Metadata-Version: 2.1\nName: endstone-mumble-host\nVersion: 0.6.1\nRequires-Python: >=3.11\nRequires-Dist: endstone>=0.11.0\n'
     files[dist+'/WHEEL']=b'Wheel-Version: 1.0\nGenerator: sleepy-protected\nRoot-Is-Purelib: true\nTag: py3-none-any\n'
     files[dist+'/entry_points.txt']=b'[endstone]\nmumble_host = endstone_mumble_host:MumbleHost\n'
     # Preserve project/upstream licensing in the distribution.

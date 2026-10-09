@@ -8,7 +8,7 @@ import threading
 import time
 from typing import Any
 
-from endstone import Player
+from endstone import ColorFormat, Player
 from endstone.command import Command, CommandSender
 from endstone.form import ActionForm
 from endstone.plugin import Plugin
@@ -31,7 +31,7 @@ ATTENUATION_LEVELS: dict[int, str] = {
 
 class MumbleHost(Plugin):
     prefix = "MumbleHost"
-    version = "0.6.0"
+    version = "0.6.1"
     api_version = "0.11"
     description = "Unified MCSV Mumble server + Item Mic proximity + SleepyPhone call routing"
     authors = ["SamSoSleepy"]
@@ -109,19 +109,58 @@ class MumbleHost(Plugin):
             delay=0,
             period=self._interval_ticks,
         )
+        self._log_status_banner()
+
+    def _log_status_banner(self) -> None:
+        """Print a compact, colourful summary of what is running."""
+        aqua = ColorFormat.AQUA
+        green = ColorFormat.GREEN
+        gray = ColorFormat.GRAY
+        yellow = ColorFormat.YELLOW
+        white = ColorFormat.WHITE
+        reset = ColorFormat.RESET
+        ok = f"{green}✔{reset}"
+        dot = f"{gray}•{reset}"
+
+        bar = f"{aqua}────────────────────────────────────────────{reset}"
+        attenuation = ATTENUATION_LEVELS.get(
+            self._default_attenuation_level, str(self._default_attenuation_level)
+        )
+
+        self.logger.info(bar)
+        self.logger.info(f"{aqua}  Mumble Host{reset} {white}v{self.version}{reset}  {gray}— พร้อมใช้งาน{reset}")
+        if self._license is not None:
+            self.logger.info(
+                f"  {ok} License    {white}server {self._license.server}{reset} "
+                f"{gray}· จำนวนผู้ใช้ {self._license.users} คน{reset}"
+            )
+        else:
+            self.logger.info(
+                f"  {yellow}✖ License    ไม่มีใบอนุญาตที่ถูกต้อง — เสียงถูกปิด{reset}"
+            )
+        if self._host is not None and self._license is not None:
+            self.logger.info(
+                f"  {ok} Voice      {white}มัมเบิลกำลังเปิดที่พอร์ต {self._mumble_port}{reset}"
+            )
         self.logger.info(
-            f"MumbleHost Unified v{self.version} enabled; "
-            f"mumble_port={self._mumble_port} "
-            f"tracking={self._interval_ticks} ticks "
-            f"default_range={self._default_range} "
-            f"max_range={self._max_range} "
-            f"attenuation={self._default_attenuation_level}"
+            f"  {dot} ระยะเสียง  {white}{self._default_range} ม.{reset} "
+            f"{gray}(สูงสุด {self._max_range} ม.){reset}"
         )
         self.logger.info(
-            "Unified MCSV mode: Item Mic state goes directly to local proximity feed; "
-            "no Android/mobile bridge is used."
+            f"  {dot} การลดเสียง {white}{attenuation}{reset} "
+            f"{gray}(ระดับ {self._default_attenuation_level}){reset}"
         )
-        self.logger.info(f"Enabled mumble_host v{self.version}")
+        self.logger.info(
+            f"  {dot} การติดตาม  {white}ทุก {self._interval_ticks} ticks{reset}"
+        )
+        self.logger.info(
+            f"  {dot} โหมด       {white}MCSV proximity{reset} "
+            f"{gray}(Item Mic → local feed){reset}"
+        )
+        self.logger.info(bar)
+        self.logger.info(
+            f"{aqua}  Mumble Minecraft bedrock VoiceChat by SamSoSleepy{reset}"
+        )
 
     def on_disable(self) -> None:
         try:
@@ -158,13 +197,14 @@ class MumbleHost(Plugin):
         try:
             self._license = load_license(self.data_folder / "license.json")
             self.logger.info(
-                f"MumbleHost license OK: server={self._license.server} "
-                f"port={self._license.port} users={self._license.users}"
+                f"{ColorFormat.GREEN}✔ ตรวจสอบใบอนุญาตผ่าน{ColorFormat.RESET} "
+                f"{ColorFormat.GRAY}— server {self._license.server}, "
+                f"พอร์ต {self._license.port}, {self._license.users} คน{ColorFormat.RESET}"
             )
         except LicenseError as exc:
             self.logger.error(
-                f"MumbleHost license check failed ({exc.code}): {exc}. "
-                "Voice is disabled until a valid license is installed."
+                f"{ColorFormat.RED}✖ ใบอนุญาตไม่ผ่าน ({exc.code}): {exc}{ColorFormat.RESET} "
+                "— เสียงจะถูกปิดจนกว่าจะติดตั้งใบอนุญาตที่ถูกต้องใหม่จากเว็บ SleepyMumla"
             )
 
     def _load_settings(self) -> None:
@@ -345,12 +385,6 @@ class MumbleHost(Plugin):
                     row[1] += cpu_ms
                     row[2] += wall_ms
                     row[3] = max(row[3], wall_ms)
-                    if _label == "tracking_total" and time.perf_counter() - self._perf_last_log >= 30:
-                        for line in self._performance_lines():
-                            self.logger.info(line)
-                        self._perf_stats.clear()
-                        self._perf_started = time.perf_counter()
-                        self._perf_last_log = self._perf_started
             setattr(self, method, measured)
 
     def _performance_lines(self) -> list[str]:
