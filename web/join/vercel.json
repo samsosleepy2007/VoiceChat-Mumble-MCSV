@@ -38,6 +38,10 @@
       "dest": "/api/not-found"
     },
     {
+      "src": "^/api/health$",
+      "dest": "/api/payments/availability?check=health"
+    },
+    {
       "src": "^/download$",
       "dest": "/downloads/SleepyMumla-v0.6.9.apk"
     },
