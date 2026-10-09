@@ -2,15 +2,15 @@ import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { PGlite } from '../web/join/node_modules/@electric-sql/pglite/dist/index.js';
 import { pluginReport } from '../web/join/lib/plugin-report.js';
+import { serverRegistry } from '../web/join/lib/server-registry.js';
 
 const SECRET='test-report-secret-0123456789';
 const UUID='5fb3cecf-9cb9-428b-9053-9fb65a47b5df';
 const pg=new PGlite();
 // node-postgres runs the multi-statement SCHEMA (no params) via the simple protocol; PGlite needs exec().
 const db={query:async(sql,args)=>{if(!args){await pg.exec(sql);return {rows:[],rowCount:0};}const r=await pg.query(sql,args);return {rows:r.rows,rowCount:r.rows.length||r.affectedRows||0};}};
-// Seed an order so owner enrichment can resolve by the 8-hex identifier.
-await pg.exec(`CREATE TABLE sleepy_payment_orders(id text,server_id text,user_name text,user_id text,paid_at timestamptz,created_at timestamptz DEFAULT now())`);
-await db.query(`INSERT INTO sleepy_payment_orders(id,server_id,user_name,user_id,paid_at) VALUES('o1','5fb3cecf','SleepyOwner','904046392106967122',now())`,[]);
+// Seed the server registry so the report can name the server and owner (keyed by Pelican identifier).
+await serverRegistry(db).remember({identifier:'5fb3cecf',serverId:'e2c42caf-e290-4fdf-9d1c-dab223a5b83e',serverName:'mic',host:'sv1.mcsv.me',ports:[10459,18655,27220],voicePort:18655,userId:'904046392106967122',userName:'SleepyOwner',pluginVersion:'0.6.3'});
 
 let embeds=[];const fetcher=async(url,opt)=>{embeds.push(JSON.parse(opt.body));return {ok:true};};
 const env={PLUGIN_REPORT_SECRET:SECRET,WebhookAlerts:'https://discord.com/api/webhooks/123456789012345678/abcDEF_token-1'};
@@ -23,8 +23,9 @@ let ts=Math.floor(Date.now()/1000);
 let r=await post({uuid:UUID,ip:'1.2.3.4',port:'10459',ts,v:'0.6.3',reason:'missing',sig:sign(UUID,String(ts))},{ip:'1.2.3.4'});
 assert.equal(r.code,204);assert.equal(embeds.length,1);
 assert.match(embeds[0].embeds[0].title,/ไม่มีใบอนุญาต/);
-const owner=embeds[0].embeds[0].fields.find(f=>f.name==='เจ้าของ').value;
-assert.match(owner,/SleepyOwner/);assert.match(owner,/904046392106967122/);
+const f=embeds[0].embeds[0].fields;const fv=n=>f.find(x=>x.name===n).value;
+assert.match(fv('เจ้าของ'),/SleepyOwner/);assert.match(fv('เจ้าของ'),/904046392106967122/);
+assert.equal(fv('ชื่อเซิร์ฟเวอร์'),'mic');assert.match(fv('พอร์ตทั้งหมด'),/10459/);
 assert(!embeds[0].embeds[0].fields.some(f=>f.name==='⚠ สถานะ'),'genuine has no suspicious flag');
 
 // Suspicious: no signature.
@@ -73,4 +74,7 @@ assert.equal((await (async()=>{const r2=res();await pluginReport({method:'GET',h
 const downRes=res();await pluginReport({method:'POST',headers:{'x-vercel-forwarded-for':'1.1.1.1'},body:{uuid:UUID,ts,sig:'x'}},downRes,{env,db:{query:async()=>{throw new Error('db down');}},fetcher});
 assert.equal(downRes.code,204);
 
+// A server not in the registry (likely a copied install) is flagged, not left blank.
+embeds=[];{const t=Math.floor(Date.now()/1000);const u='11112222-3333-4444-5555-666677778888';await post({uuid:u,ip:'5.5.5.5',port:'1',ts:t,v:'0.6.3',reason:'missing',sig:sign(u,String(t))},{ip:'5.5.5.5'});}
+assert.match(embeds[0].embeds[0].fields.find(x=>x.name==='เจ้าของ').value,/ก๊อปไฟล์|เคยติดตั้ง/);
 console.log('PASS plugin-report: genuine vs suspicious (sig+IP), malformed dropped, scripted burst permanently blocked and log purged, spaced reports allowed, per-IP rate limit, owner enrichment, GET rejected, DB failure fails open');
