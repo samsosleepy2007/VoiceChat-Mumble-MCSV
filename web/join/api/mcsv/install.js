@@ -8,6 +8,7 @@ import { checkoutPayment,requirePayment,consumeInstallation,PaymentError } from 
 import {safeHistory} from '../../lib/payment-history.js';
 
 import { artifacts } from '../../lib/install-artifacts.js';
+import { latestEndweave, loadEndweave } from '../../lib/endweave.js';
 async function consumeExisting(user,server,reference){try{await consumeInstallation(user,server);}catch{console.warn(JSON.stringify({event:'existing_installation_grant_pending',reference}));}}
 export default async function handler(req,res){
  headers(res);
@@ -25,13 +26,13 @@ export default async function handler(req,res){
   if(!body||!['prepare','install','status'].includes(body.action)||JSON.stringify(body).length>4096)return res.status(400).json({error:'format'});
   action=body.action;stage='prepare';const client=createMCSVClient(body.apiKey);
   if(body.action==='prepare'){
-   const plan=publicPlan(await prepareInstallation(client));
+   const plan=publicPlan(await prepareInstallation(client,{endweave:await latestEndweave()}));
    if(plan.compatible&&plan.installAllowed){stage='payment';if(plan.installation.present){await consumeExisting(s.user.id,plan.server.id,reference);plan.payment={required:false,reason:'installed'};}else plan.payment=await checkoutPayment(s.user.id,plan.server.id,plan.server.name,s.user.name);}
    return res.status(200).json(plan);
   }
   if(body.action==='status'){tracking=s.installPending?.paymentTracking||null;const result=await installationStatus(client,s.installPending);if(result.ready)await safeHistory(h=>h.transition(s.user.id,tracking,'completed'));await safeHistory(h=>h.flush());return res.status(200).json(result);}
   if(body.confirm!==true||typeof body.serverId!=='string'||typeof body.world!=='string'||!Number.isInteger(body.voicePort))return res.status(400).json({error:'format'});
-  let usedPayment=false;stage='install';const result=await installOnMCSV(client,body,async()=>({...await artifacts(),transferOrigin:ORIGIN}),async fresh=>{stage='payment';if(!fresh.installation.present){await requirePayment(s.user.id,fresh.server.id);usedPayment=true;}tracking=await safeHistory(h=>h.begin(s.user.id,fresh.server.id));await safeHistory(h=>h.flush());stage='install';},async component=>{await safeHistory(h=>h.component(s.user.id,tracking,component));});if(usedPayment)await consumeInstallation(s.user.id,result.server.id);else await consumeExisting(s.user.id,result.server.id,reference);s.installPending={serverId:result.server.id,host:result.server.host,voicePort:result.voicePort,action:result.powerAction,previousUptime:result.previousUptime,requestedAt:Date.now(),paymentTracking:tracking};await s.save();return res.status(200).json(result);
+  let usedPayment=false;stage='install';const endweave=await latestEndweave();const result=await installOnMCSV(client,body,async()=>({...await artifacts(),endweave:await loadEndweave(endweave),transferOrigin:ORIGIN}),async fresh=>{stage='payment';if(!fresh.installation.present){await requirePayment(s.user.id,fresh.server.id);usedPayment=true;}tracking=await safeHistory(h=>h.begin(s.user.id,fresh.server.id));await safeHistory(h=>h.flush());stage='install';},async component=>{await safeHistory(h=>h.component(s.user.id,tracking,component));},{endweave});if(usedPayment)await consumeInstallation(s.user.id,result.server.id);else await consumeExisting(s.user.id,result.server.id,reference);s.installPending={serverId:result.server.id,host:result.server.host,voicePort:result.voicePort,action:result.powerAction,previousUptime:result.previousUptime,requestedAt:Date.now(),paymentTracking:tracking};await s.save();return res.status(200).json(result);
  }catch(error){const code=error instanceof MCSVError||error instanceof PaymentError?error.code:stage==='request_body'?'format':stage==='payment'?'payment_unavailable':'auth_check_unavailable';const partial=error.partial===true;
   if(tracking&&userId&&(action==='install'||['voice_failed','status_expired'].includes(code))){await safeHistory(h=>h.transition(userId,tracking,'failed',code));await safeHistory(h=>h.flush());}
   console.warn(JSON.stringify({event:'mcsv_install_failed',reference,stage:error.stage||stage,code,partial,operation:error.operation||null,upstreamStatus:error instanceof MCSVError?error.status:null}));

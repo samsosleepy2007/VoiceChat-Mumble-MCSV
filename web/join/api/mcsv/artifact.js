@@ -1,10 +1,12 @@
 import {artifacts} from '../../lib/install-artifacts.js';
 import {packArchive} from '../../lib/mcsv-install.js';
+import {endweaveBySha} from '../../lib/endweave.js';
 export default async function handler(req,res){
  res.setHeader('X-Content-Type-Options','nosniff');
  if(req.method!=='GET')return res.status(405).end();
  const query=new URL(req.url,'https://localhost').searchParams;
- if(!['packs','plugin'].includes(query.get('kind'))||[...query.keys()].some(k=>!['kind','behavior','resource','version'].includes(k))||[...query.values()].some(v=>v.length>512))return res.status(400).end();
+ if(!['packs','plugin','endweave'].includes(query.get('kind'))||[...query.keys()].some(k=>!['kind','behavior','resource','version','sha'].includes(k))||[...query.values()].some(v=>v.length>512))return res.status(400).end();
  if(query.get('version')!=='2.15.44')return res.status(400).end();
- try{const source=await artifacts();const bytes=query.get('kind')==='plugin'?source.wheel:packArchive(source,{behavior:query.get('behavior'),resource:query.get('resource')});res.setHeader('Content-Type','application/octet-stream');res.setHeader('Cache-Control','public, max-age=3600');return res.status(200).send(bytes);}catch(error){return res.status(error.code==='unsafe_layout'?400:503).end();}
+ const kind=query.get('kind');if(kind==='endweave'&&!/^[0-9a-f]{64}$/.test(query.get('sha')||''))return res.status(400).end();
+ try{const bytes=kind==='endweave'?await endweaveBySha(query.get('sha')):kind==='plugin'?(await artifacts()).wheel:packArchive(await artifacts(),{behavior:query.get('behavior'),resource:query.get('resource')});res.setHeader('Content-Type','application/octet-stream');res.setHeader('Cache-Control','public, max-age=3600');return res.status(200).send(bytes);}catch(error){return res.status(error.code==='unsafe_layout'?400:error.code==='artifact_unavailable'&&kind==='endweave'?404:503).end();}
 }
