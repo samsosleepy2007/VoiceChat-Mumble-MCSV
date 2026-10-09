@@ -13,6 +13,8 @@ import urllib.request
 from importlib import resources
 from typing import Any
 
+from endstone import ColorFormat
+
 RUNTIME = pathlib.Path("/home/container/mumble-runtime")
 ROOTFS = RUNTIME / "rootfs"
 LAYERS = RUNTIME / "layers"
@@ -322,7 +324,8 @@ class MumbleRuntimeHost:
 
         self._set_status("running", pid=self._proc.pid)
         self._logger.info(
-            f"VC proximity Mumble server running on 0.0.0.0:{self._port}"
+            f"{ColorFormat.GREEN}✔ เซิร์ฟเวอร์เสียง Mumble ทำงานแล้ว{ColorFormat.RESET} "
+            f"{ColorFormat.GRAY}— 0.0.0.0:{self._port}{ColorFormat.RESET}"
         )
 
     def _bootstrap_and_monitor(self) -> None:

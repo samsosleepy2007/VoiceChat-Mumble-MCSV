@@ -23,6 +23,12 @@ for module, names in {
     for name in names:
         setattr(sys.modules[module], name, type(name, (), {}))
 sys.modules['endstone.event'].event_handler = lambda fn: fn
+class _ColorMeta(type):
+    def __getattr__(cls, _name):
+        return ''
+class ColorFormat(metaclass=_ColorMeta):
+    pass
+sys.modules['endstone'].ColorFormat = ColorFormat
 
 def exercise(path):
     for name in list(sys.modules):
@@ -65,16 +71,16 @@ def exercise(path):
         sys.path.pop(0)
 
 expected = exercise(ROOT / 'src')
-wheel = ROOT / 'obfuscator/plugin/endstone_mumble_host-0.5.5-py3-none-any.whl'
+wheel = ROOT / 'obfuscator/plugin/endstone_mumble_host-0.6.1-py3-none-any.whl'
 with zipfile.ZipFile(wheel) as archive, tempfile.TemporaryDirectory() as temp:
     assert archive.testzip() is None
-    for name, digest, size in csv.reader(io.StringIO(archive.read('endstone_mumble_host-0.5.5.dist-info/RECORD').decode())):
+    for name, digest, size in csv.reader(io.StringIO(archive.read('endstone_mumble_host-0.6.1.dist-info/RECORD').decode())):
         if not digest:
             continue
         data = archive.read(name)
         assert len(data) == int(size)
         assert digest == 'sha256=' + base64.urlsafe_b64encode(hashlib.sha256(data).digest()).decode().rstrip('=')
-    assert b'mumble_host = endstone_mumble_host:MumbleHost' in archive.read('endstone_mumble_host-0.5.5.dist-info/entry_points.txt')
+    assert b'mumble_host = endstone_mumble_host:MumbleHost' in archive.read('endstone_mumble_host-0.6.1.dist-info/entry_points.txt')
     for name in archive.namelist():
         if name.endswith('.py'):
             data = archive.read(name)
