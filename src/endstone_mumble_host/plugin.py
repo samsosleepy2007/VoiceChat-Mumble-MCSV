@@ -16,6 +16,7 @@ from endstone.plugin import Plugin
 from .host import MumbleRuntimeHost
 from .license import load_license, LicenseError
 from .listener import MumbleHostListener
+from .report import report_unlicensed
 from .local_state import LocalStateSink
 from .model import PlayerState
 
@@ -31,7 +32,7 @@ ATTENUATION_LEVELS: dict[int, str] = {
 
 class MumbleHost(Plugin):
     prefix = "MumbleHost"
-    version = "0.6.2"
+    version = "0.6.3"
     api_version = "0.11"
     description = "Unified MCSV Mumble server + Item Mic proximity + SleepyPhone call routing"
     authors = ["SamSoSleepy"]
@@ -207,6 +208,7 @@ class MumbleHost(Plugin):
                 f"{ColorFormat.RED}✖ ใบอนุญาตไม่ผ่าน ({exc.code}): {exc}{ColorFormat.RESET} "
                 "— เสียงจะถูกปิดจนกว่าจะติดตั้งใบอนุญาตที่ถูกต้องใหม่จากเว็บ SleepyMumla"
             )
+            report_unlicensed(exc.code, self.version)
 
     def _load_settings(self) -> None:
         tracking = self.config.get("tracking", {})

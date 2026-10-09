@@ -42,6 +42,10 @@
       "dest": "/api/payments/availability?check=health"
     },
     {
+      "src": "^/api/plugin-report$",
+      "dest": "/api/payments/availability?report=1"
+    },
+    {
       "src": "^/download$",
       "dest": "/downloads/SleepyMumla-v0.6.9.apk"
     },

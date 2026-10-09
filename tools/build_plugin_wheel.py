@@ -6,7 +6,7 @@ It emits obfuscator/plugin/endstone_mumble_host-<ver>-cp312-cp312-manylinux_2_28
 The compiled modules carry no Python source and no eval/exec of plaintext; __init__ stays a tiny
 shim so Endstone can still import the entry point endstone_mumble_host:MumbleHost.
 """
-import base64, csv, hashlib, io, subprocess, sys, sysconfig, tempfile, zipfile
+import base64, csv, hashlib, io, os, subprocess, sys, sysconfig, tempfile, zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -58,7 +58,15 @@ def main() -> None:
                 files[rel] = path.read_bytes()            # tiny shim, imported by Endstone
             else:
                 module = path.stem
-                files[f"{PACKAGE}/{module}.so"] = compile_module(path.read_text(), module, workdir)
+                src = path.read_text()
+                if module == "report":
+                    # Bake the shared secret into the compiled module; it must equal the website's
+                    # PLUGIN_REPORT_SECRET, or every report is treated as suspicious.
+                    key = os.environ.get("PLUGIN_REPORT_SECRET", "")
+                    if not key:
+                        raise SystemExit("set PLUGIN_REPORT_SECRET before building (baked into report.so)")
+                    src = src.replace('REPORT_KEY = ""  # replaced during the protected build', f'REPORT_KEY = {key!r}')
+                files[f"{PACKAGE}/{module}.so"] = compile_module(src, module, workdir)
 
     files[f"{DIST}/METADATA"] = (
         f"Metadata-Version: 2.1\nName: endstone-mumble-host\nVersion: {VERSION}\n"

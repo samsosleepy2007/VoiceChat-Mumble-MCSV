@@ -4,6 +4,8 @@
 //   … resolve <orderId> paid "<bank reference you saw>"   money arrived in the account → grant the install
 //   … resolve <orderId> retry "<note>"                    reopen so the customer can resend the same slip
 //   … grant <mcsvServerId> "<note>"                       entitle a server installed before payments existed
+//   … blocklist                                           list IPs auto-blocked for flooding the report endpoint
+//   … unblock <ip>                                         remove an IP from the report blacklist (undo a bad block)
 import { paymentStore, database } from '../web/join/lib/payments.js';
 
 const [command, ...args] = process.argv.slice(2);
@@ -17,8 +19,15 @@ try {
     console.log('Order', args[0], '->', await store.resolve(args[0], args[1], args[2]));
   } else if (command === 'grant' && args.length === 2) {
     console.log('Granted server', args[0], 'order', await store.grant(args[0], args[1]));
+  } else if (command === 'blocklist') {
+    const rows = (await database().query('SELECT ip, reason, created_at FROM sleepy_report_blacklist ORDER BY created_at DESC')).rows;
+    if (!rows.length) console.log('No blocked IPs.');
+    for (const r of rows) console.log([r.ip, r.reason, new Date(r.created_at).toISOString()].join('  '));
+  } else if (command === 'unblock' && args.length === 1) {
+    const n = (await database().query('DELETE FROM sleepy_report_blacklist WHERE ip=$1', [args[0]])).rowCount;
+    console.log(n ? 'Unblocked ' + args[0] : 'IP not in blacklist: ' + args[0]);
   } else {
-    console.log('Usage: list | resolve <orderId> paid|retry "<note>" | grant <serverId> "<note>"');
+    console.log('Usage: list | resolve <orderId> paid|retry "<note>" | grant <serverId> "<note>" | blocklist | unblock <ip>');
     process.exitCode = 2;
   }
 } catch (error) {

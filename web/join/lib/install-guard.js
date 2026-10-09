@@ -35,6 +35,8 @@ export function installGuard(db=null,{env=process.env}={}){
    await safely(async c=>{const r=await c.query(`INSERT INTO sleepy_rate_limits(key,window_start,hits) VALUES($1,date_bin(make_interval(mins=>$2),now(),'2000-01-01'),1)
     ON CONFLICT(key,window_start) DO UPDATE SET hits=sleepy_rate_limits.hits+1 RETURNING hits`,[action+':'+user,rule.minutes]);if(r.rows[0].hits>rule.hits)throw new GuardError('rate_limit');},null);
   },
-  async prune(){return safely(async c=>{await c.query("DELETE FROM sleepy_rate_limits WHERE window_start<now()-interval '1 day'");await c.query('DELETE FROM sleepy_install_locks WHERE expires_at<now()');return true;},false);}
+  async prune(){return safely(async c=>{await c.query("DELETE FROM sleepy_rate_limits WHERE window_start<now()-interval '1 day'");await c.query('DELETE FROM sleepy_install_locks WHERE expires_at<now()');
+   // Report log is only kept to detect bursts; blacklist is kept (it is the permanent block).
+   await c.query("DELETE FROM sleepy_report_log WHERE at<now()-interval '7 days'").catch(()=>{});return true;},false);}
  };
 }
