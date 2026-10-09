@@ -70,8 +70,12 @@ def exercise(path):
     finally:
         sys.path.pop(0)
 
+import glob
 expected = exercise(ROOT / 'src')
-wheel = ROOT / 'obfuscator/plugin/endstone_mumble_host-0.6.2-py3-none-any.whl'
+matches = glob.glob(str(ROOT / 'obfuscator/plugin/endstone_mumble_host-0.6.2-*.whl'))
+assert len(matches) == 1, matches
+wheel = Path(matches[0])
+native = '-cp3' in wheel.name  # compiled modules only import under the matching Python
 with zipfile.ZipFile(wheel) as archive, tempfile.TemporaryDirectory() as temp:
     assert archive.testzip() is None
     for name, digest, size in csv.reader(io.StringIO(archive.read('endstone_mumble_host-0.6.2.dist-info/RECORD').decode())):
@@ -81,12 +85,22 @@ with zipfile.ZipFile(wheel) as archive, tempfile.TemporaryDirectory() as temp:
         assert len(data) == int(size)
         assert digest == 'sha256=' + base64.urlsafe_b64encode(hashlib.sha256(data).digest()).decode().rstrip('=')
     assert b'mumble_host = endstone_mumble_host:MumbleHost' in archive.read('endstone_mumble_host-0.6.2.dist-info/entry_points.txt')
-    for name in archive.namelist():
+    members = archive.namelist()
+    for name in members:
         if name.endswith('.py'):
             data = archive.read(name)
             compile(data, name, 'exec')
             assert b'class MumbleHost' not in data
             assert b'https://registry-1.docker.io' not in data
-    archive.extractall(temp)
-    assert exercise(Path(temp)) == expected
+    if native:
+        # Source logic is compiled away: only the __init__ shim stays as .py, the rest are .so.
+        for module in ['plugin', 'host', 'listener', 'model', 'local_state', 'license']:
+            assert f'endstone_mumble_host/{module}.so' in members, module
+            assert f'endstone_mumble_host/{module}.py' not in members
+        if sys.version_info[:2] == (3, 12):
+            archive.extractall(temp)
+            assert exercise(Path(temp)) == expected
+    else:
+        archive.extractall(temp)
+        assert exercise(Path(temp)) == expected
 print('PASS: wheel RECORD, entry point, all module imports, type hints, API signatures, voice/call routing and event callbacks')
