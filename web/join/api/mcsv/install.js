@@ -11,6 +11,7 @@ import { artifacts } from '../../lib/install-artifacts.js';
 import { latestEndweave, loadEndweave } from '../../lib/endweave.js';
 import { installGuard,GuardError } from '../../lib/install-guard.js';
 import { alert } from '../../lib/alerts.js';
+import { isAdmin } from '../../lib/admin.js';
 async function consumeExisting(server,reference){try{await consumeInstallation(server);}catch{console.warn(JSON.stringify({event:'existing_installation_grant_pending',reference}));}}
 // Files on the server prove nothing (anyone can upload a file named like our plugin). Only a license this
 // website signed for this exact server, or a payment record for it, lets an install skip checkout.
@@ -33,7 +34,7 @@ export default async function handler(req,res){
   stage='prepare';const client=createMCSVClient(body.apiKey);
   if(body.action==='prepare'){
    const plan=publicPlan(await prepareInstallation(client,{endweave:await latestEndweave()}));
-   if(plan.compatible&&plan.installAllowed){stage='payment';if(licensed(plan)){await consumeExisting(plan.server.id,reference);plan.payment={required:false,reason:'licensed'};}else plan.payment=await checkoutPayment(s.user.id,plan.server.id,plan.server.name,s.user.name);}
+   if(plan.compatible&&plan.installAllowed){stage='payment';if(licensed(plan)){await consumeExisting(plan.server.id,reference);plan.payment={required:false,reason:'licensed'};}else if(isAdmin(s.user.id))plan.payment={required:false,reason:'admin'};else plan.payment=await checkoutPayment(s.user.id,plan.server.id,plan.server.name,s.user.name);}
    return res.status(200).json(plan);
   }
   if(body.action==='status'){tracking=s.installPending?.paymentTracking||null;const result=await installationStatus(client,s.installPending);if(result.ready)await safeHistory(h=>h.transition(s.user.id,tracking,'completed'));await safeHistory(h=>h.flush());return res.status(200).json(result);}
@@ -41,7 +42,7 @@ export default async function handler(req,res){
   stage='lock';const release=await guard.lock(body.serverId);
   try{
    let usedPayment=false;stage='install';const endweave=await latestEndweave();
-   const result=await installOnMCSV(client,body,async()=>({...await artifacts(),endweave:await loadEndweave(endweave),transferOrigin:ORIGIN}),async fresh=>{stage='payment';serverName=fresh.server.name;if(!licensed(fresh)){await requirePayment(fresh.server.id);usedPayment=true;}tracking=await safeHistory(h=>h.begin(s.user.id,fresh.server.id));await safeHistory(h=>h.flush());stage='install';return true;},async component=>{await safeHistory(h=>h.component(s.user.id,tracking,component));},{endweave});
+   const result=await installOnMCSV(client,body,async()=>({...await artifacts(),endweave:await loadEndweave(endweave),transferOrigin:ORIGIN}),async fresh=>{stage='payment';serverName=fresh.server.name;if(isAdmin(s.user.id)&&!licensed(fresh))console.warn(JSON.stringify({event:'admin_install',reference,server:fresh.server.id}));else if(!licensed(fresh)){await requirePayment(fresh.server.id);usedPayment=true;}tracking=await safeHistory(h=>h.begin(s.user.id,fresh.server.id));await safeHistory(h=>h.flush());stage='install';return true;},async component=>{await safeHistory(h=>h.component(s.user.id,tracking,component));},{endweave});
    if(usedPayment)await consumeInstallation(result.server.id);else await consumeExisting(result.server.id,reference);s.installPending={serverId:result.server.id,host:result.server.host,voicePort:result.voicePort,action:result.powerAction,previousUptime:result.previousUptime,requestedAt:Date.now(),paymentTracking:tracking};await s.save();return res.status(200).json(result);
   }finally{await release();}
  }catch(error){const code=error instanceof MCSVError||error instanceof PaymentError||error instanceof GuardError?error.code:stage==='request_body'?'format':stage==='payment'?'payment_unavailable':'auth_check_unavailable';const partial=error.partial===true;

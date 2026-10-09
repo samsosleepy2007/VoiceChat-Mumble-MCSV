@@ -123,3 +123,13 @@ assert.equal(await alert('ติดตั้งไม่สำเร็จ',{ref
 assert.equal(posted.url,hook);assert.deepEqual(posted.body.allowed_mentions,{parse:[]});assert(!JSON.stringify(posted.body).includes('@everyone'));
 assert.equal(await alert('x',{},{env:{WebhookAlerts:hook},fetcher:async()=>{throw Error('down');}}),false);
 console.log('PASS alerts: optional, mention-safe, never throw');
+
+// --- Admin accounts install free (identity from the Discord session only) ----------------------------
+const { isAdmin } = await import('../web/join/lib/admin.js');
+assert(isAdmin('904046392106967122',{}));
+assert(!isAdmin('104046392106967122',{}));assert(!isAdmin('',{}));assert(!isAdmin(904046392106967122,{}));assert(!isAdmin('904046392106967122 ',{}));
+assert(isAdmin('123456789012345678',{ADMIN_DISCORD_IDS:'111111111111111111, 123456789012345678'}));
+assert(!isAdmin('123456789012345678',{ADMIN_DISCORD_IDS:'abc,123'}));
+const installApi=await readFile(new URL('../web/join/api/mcsv/install.js',import.meta.url),'utf8');
+assert(installApi.includes("isAdmin(s.user.id)"),'admin is decided from the session user');assert(!/isAdmin\(body/.test(installApi),'never from the request body');
+console.log('PASS admin: owner ID and ADMIN_DISCORD_IDS install free; decided from the Discord session, not the request');
