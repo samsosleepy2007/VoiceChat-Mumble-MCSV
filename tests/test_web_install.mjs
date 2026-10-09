@@ -13,7 +13,9 @@ function assertLicense(text,{server='5fb3cecf',port,users=99}){
  assert.equal(body.format,'sleepymumla-license-1');assert.equal(body.server,server);assert.equal(body.port,port);assert.equal(body.users,users);
  assert(edVerify(null,licenseMessage(body.server,body.port,body.users,body.issued),licenseKeys.publicKey,Buffer.from(body.signature,'base64')),'license signature invalid');
 }
-const fixture={wheel:Buffer.from('test-wheel'),packs:Object.fromEntries(PACKS.map(p=>[p.type,{'manifest.json':Buffer.from(JSON.stringify({header:{uuid:p.uuid,version:[2,15,44]}})),'test.txt':Buffer.from('test')}]))};
+const { BUNDLED, pickRelease, latestEndweave, loadEndweave, endweaveBytes, resetEndweaveCache } = await import('../web/join/lib/endweave.js');
+const weaveBytes=Buffer.from('test-endweave');const weaveInfo={...BUNDLED,sha256:createHash('sha256').update(weaveBytes).digest('hex'),size:weaveBytes.length,source:'test'};
+const fixture={endweave:{info:weaveInfo,bytes:weaveBytes},wheel:Buffer.from('test-wheel'),packs:Object.fromEntries(PACKS.map(p=>[p.type,{'manifest.json':Buffer.from(JSON.stringify({header:{uuid:p.uuid,version:[2,15,44]}})),'test.txt':Buffer.from('test')}]))};
 const required=['server_overview','files_list','files_read','files_read_many','files_read_base64','files_upload_base64','files_fetch_url','files_decompress','files_write','files_edit','files_compress','files_delete','power_action','domain_info'];
 function server({state='offline',permission=true,world='Bedrock level'}={}){
  const files=new Map([['/server.properties','level-name='+world+'\nserver-port=10459\n'],['/worlds/'+world+'/world_behavior_packs.json','[{"pack_id":"other-bp","version":[1,0,0],"extra":true}]'],['/worlds/'+world+'/world_resource_packs.json','[]'],['/plugins/mumble_host/config.toml','# keep this\n[mumble]\nport = 18655 # voice\nusers = 17\n[voice]\nmax_range = 150\n']]);
@@ -68,8 +70,43 @@ console.log('PASS installation detection: absent/current/old versions, confirmat
 
 const timeouts=[],originalTimeout=AbortSignal.timeout;AbortSignal.timeout=ms=>{timeouts.push(ms);return originalTimeout(ms);};try{const timed=createMCSVClient('mcsv_test_key_12345',async()=>({ok:true,json:async()=>({ok:true,result:{success:true}})}));await timed.call('files_upload_base64',{path:'/test.zip',content_base64:'AA=='});await timed.call('files_decompress',{root:'/',file:'test.zip'});await timed.call('server_overview');assert.deepEqual(timeouts,[120000,120000,30000]);}finally{AbortSignal.timeout=originalTimeout;}const bodyTimeout=createMCSVClient('mcsv_test_key_12345',async()=>({ok:true,json:async()=>{const error=Error('timeout');error.name='TimeoutError';throw error;}}));await assert.rejects(bodyTimeout.call('files_decompress'),e=>e.code==='timeout'&&e.operation==='files_decompress');console.log('PASS MCSV timeouts: long file operations get 120 seconds, reads keep 30 seconds, response-body timeouts retain operation');
 
-const direct=server();const directCall=direct.client.call;direct.client.call=async(name,args)=>{if(name==='files_fetch_url'){direct.calls.push({name,args});const url=new URL(args.url);assert.equal(url.origin,'https://sleepyvoice-join.vercel.app');const bytes=url.searchParams.get('kind')==='plugin'?fixture.wheel:packArchive(fixture,{behavior:url.searchParams.get('behavior'),resource:url.searchParams.get('resource')});direct.files.set((args.directory==='/'?'':args.directory)+'/'+args.filename,bytes);return {success:true};}return directCall(name,args);};
-await installOnMCSV(direct.client,{serverId:'test-server',world:'Bedrock level',voicePort:18655},async()=>({...fixture,transferOrigin:'https://sleepyvoice-join.vercel.app'}));assert.equal(direct.calls.filter(c=>c.name==='files_fetch_url').length,2);assert(!direct.calls.some(c=>c.name==='files_upload_base64'));
+const direct=server();const directCall=direct.client.call;direct.client.call=async(name,args)=>{if(name==='files_fetch_url'){direct.calls.push({name,args});const url=new URL(args.url);assert.equal(url.origin,'https://sleepyvoice-join.vercel.app');const kind=url.searchParams.get('kind');if(kind==='endweave')assert.equal(url.searchParams.get('sha'),weaveInfo.sha256);const bytes=kind==='endweave'?weaveBytes:kind==='plugin'?fixture.wheel:packArchive(fixture,{behavior:url.searchParams.get('behavior'),resource:url.searchParams.get('resource')});direct.files.set((args.directory==='/'?'':args.directory)+'/'+args.filename,bytes);return {success:true};}return directCall(name,args);};
+await installOnMCSV(direct.client,{serverId:'test-server',world:'Bedrock level',voicePort:18655},async()=>({...fixture,transferOrigin:'https://sleepyvoice-join.vercel.app'}));assert.equal(direct.calls.filter(c=>c.name==='files_fetch_url').length,3);assert(!direct.calls.some(c=>c.name==='files_upload_base64'));
 assert.throws(()=>packArchive(fixture,{behavior:'../plugins'}),e=>e.code==='unsafe_layout');
 const damaged=server();const damagedCall=damaged.client.call;damaged.client.call=async(name,args)=>name==='files_fetch_url'?{}:name==='files_read_base64'?{content_base64:Buffer.from('bad').toString('base64')}:damagedCall(name,args);await assert.rejects(installOnMCSV(damaged.client,{serverId:'test-server',world:'Bedrock level',voicePort:18655},async()=>({...fixture,transferOrigin:'https://sleepyvoice-join.vercel.app'})),e=>e.code==='verification_failed'&&e.stage==='packs_upload');assert(!damaged.calls.some(c=>['files_decompress','power_action'].includes(c.name)));
 console.log('PASS direct downloads: no Base64 upload, path validation, corrupt download rejected before extraction/restart');
+
+// Endweave: installed with the system, replaced when older, never downgraded, reported per part.
+assert.equal(current.files.get('/plugins/'+BUNDLED.name).toString(),'test-endweave');
+const firstPlan=await prepareInstallation(current.client);assert.deepEqual(firstPlan.installation.parts,{plugin:'current',addon:'current',endweave:'current',license:'valid'});assert.equal(firstPlan.installation.latest.endweave.version,'0.5.1');assert.equal(firstPlan.installation.latest.endweave.project,'https://github.com/EndstoneMC/endweave');
+const weaveOld=server();await installOnMCSV(weaveOld.client,{serverId:'test-server',world:'Bedrock level',voicePort:18655},async()=>fixture);
+weaveOld.files.delete('/plugins/'+BUNDLED.name);weaveOld.files.set('/plugins/endstone_endweave-0.4.3-py3-none-any.whl',Buffer.from('old-weave'));
+const oldPlan=await prepareInstallation(weaveOld.client);assert.equal(oldPlan.installation.status,'update');assert.equal(oldPlan.installation.parts.endweave,'update');assert.deepEqual(oldPlan.installation.endweaveVersions,['0.4.3']);
+const updated=await installOnMCSV(weaveOld.client,{serverId:'test-server',world:'Bedrock level',voicePort:18655},async()=>fixture);assert.equal(updated.endweaveVersion,'0.5.1');
+assert(!weaveOld.files.has('/plugins/endstone_endweave-0.4.3-py3-none-any.whl'));assert(weaveOld.calls.some(c=>c.name==='files_compress'&&c.args.files.includes('endstone_endweave-0.4.3-py3-none-any.whl')));assert.equal((await prepareInstallation(weaveOld.client)).installation.status,'current');
+const weaveNew=server();await installOnMCSV(weaveNew.client,{serverId:'test-server',world:'Bedrock level',voicePort:18655},async()=>fixture);
+weaveNew.files.delete('/plugins/'+BUNDLED.name);weaveNew.files.set('/plugins/endstone_endweave-0.6.0-cp312-abi3-manylinux_2_28_x86_64.whl',Buffer.from('newer-weave'));
+const newPlan=await prepareInstallation(weaveNew.client);assert.equal(newPlan.installation.parts.endweave,'newer');assert.equal(newPlan.installation.status,'current');
+const beforeNew=weaveNew.calls.length;await installOnMCSV(weaveNew.client,{serverId:'test-server',world:'Bedrock level',voicePort:18655,reinstall:true},async()=>fixture);
+assert(weaveNew.files.has('/plugins/endstone_endweave-0.6.0-cp312-abi3-manylinux_2_28_x86_64.whl'));assert(!weaveNew.files.has('/plugins/'+BUNDLED.name));assert(!weaveNew.calls.slice(beforeNew).some(c=>c.name==='files_upload_base64'&&c.args.path.includes('endweave')));
+// License state: a forged or missing license means the server is not current.
+const forged=server();await installOnMCSV(forged.client,{serverId:'test-server',world:'Bedrock level',voicePort:18655},async()=>fixture);
+const signed=JSON.parse(forged.files.get('/plugins/mumble_host/license.json'));forged.files.set('/plugins/mumble_host/license.json',JSON.stringify({...signed,users:500}));
+assert.equal((await prepareInstallation(forged.client)).installation.parts.license,'invalid');assert.equal((await prepareInstallation(forged.client)).installation.status,'update');
+forged.files.delete('/plugins/mumble_host/license.json');assert.equal((await prepareInstallation(forged.client)).installation.parts.license,'missing');
+forged.files.set('/plugins/mumble_host/license.json',JSON.stringify({...signed,server:'deadbeef'}));assert.equal((await prepareInstallation(forged.client)).installation.parts.license,'invalid');
+console.log('PASS endweave install: fresh install, old version replaced and backed up, newer kept, license valid/invalid/missing');
+
+// Release selection: newest stable release in the series, with GitHub's published digest.
+const asset=(v,extra={})=>({name:'endstone_endweave-'+v+'-cp312-abi3-manylinux_2_28_x86_64.whl',size:900000,digest:'sha256:'+'a'.repeat(64),browser_download_url:'https://github.com/EndstoneMC/endweave/releases/download/v'+v+'/endstone_endweave-'+v+'-cp312-abi3-manylinux_2_28_x86_64.whl',...extra});
+const releases=[{assets:[asset('0.6.0')]},{prerelease:true,assets:[asset('0.5.9')]},{assets:[asset('0.5.3',{digest:undefined})]},{assets:[asset('0.5.2'),{...asset('0.5.2'),name:'endstone_endweave-0.5.2-cp312-abi3-win_amd64.whl'}]},{assets:[asset('0.5.4',{browser_download_url:'https://evil.example/x.whl'})]},{assets:[asset('0.5.5',{size:9000000})]}];
+assert.deepEqual(pickRelease(releases,[0,5]).version,[0,5,2]);assert.deepEqual(pickRelease(releases,[0,6]).version,[0,6,0]);assert.equal(pickRelease(releases,[0,7]),null);
+resetEndweaveCache();assert.equal(await latestEndweave({request:async()=>{throw Error('offline');}}),BUNDLED);
+resetEndweaveCache();assert.deepEqual((await latestEndweave({request:async()=>({ok:true,json:async()=>releases})})).version,[0,5,2]);
+resetEndweaveCache();assert.equal(await latestEndweave({request:async()=>({ok:true,json:async()=>[{assets:[asset('0.5.0')]}]})}),BUNDLED,'never older than the bundled copy');
+resetEndweaveCache();assert.deepEqual((await latestEndweave({env:{ENDWEAVE_SERIES:'0.6'},request:async()=>({ok:true,json:async()=>releases})})).version,[0,6,0]);
+// Download failure falls back to the bundled copy; a tampered download is rejected.
+resetEndweaveCache();const remote={...pickRelease(releases,[0,5])};
+const fallback=await loadEndweave(remote,{request:async()=>({ok:false})});assert.equal(fallback.info,BUNDLED);assert.equal(createHash('sha256').update(fallback.bytes).digest('hex'),BUNDLED.sha256);
+await assert.rejects(endweaveBytes(remote,{request:async()=>({ok:true,arrayBuffer:async()=>Buffer.alloc(900000)})}),e=>e.code==='artifact_integrity');
+console.log('PASS endweave releases: series lock, digest required, prerelease/foreign/oversized skipped, offline and download fallback, tamper rejected');

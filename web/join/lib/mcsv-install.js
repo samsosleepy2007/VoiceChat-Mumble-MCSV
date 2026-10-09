@@ -1,7 +1,8 @@
 import { createHash,randomUUID } from 'node:crypto';
 import { unzipSync,zipSync } from 'fflate';
 import { MCSVError } from './mcsv.js';
-import { signLicense, licenseEnabled, LICENSE_USERS, issuedToday } from './license.js';
+import { signLicense, licenseEnabled, verifyLicense, LICENSE_USERS, issuedToday } from './license.js';
+import { BUNDLED as ENDWEAVE_BUNDLED, endweaveVersion, publicEndweave } from './endweave.js';
 
 export const WHEEL='endstone_mumble_host-0.6.1-py3-none-any.whl';
 export const PACKS=[{type:'behavior',uuid:'b6411120-cc4e-44a9-b28d-f43b10cafd86',folder:'SleepyMumla_BP'},{type:'resource',uuid:'cb345edb-6e6c-49ac-9950-e2ae07bda214',folder:'SleepyMumla_RP'}];
@@ -61,7 +62,15 @@ async function findExisting(client,root,worldFiles,world){
  }
  return {found,versions};
 }
-export async function prepareInstallation(client){
+const ENDWEAVE_FILE=/^endstone_endweave-.*\.whl$/i;
+// keep: an equal-or-newer Endweave is already the only copy (never downgrade); stale: wheels to replace.
+function endweaveChange(names,target){
+ const versions=names.map(endweaveVersion);
+ const newer=versions.some(v=>v&&compareVersion(v,target.version)>0);
+ const keep=newer||(names.length===1&&names[0]===target.name);
+ return {status:!names.length?'absent':newer?'newer':keep?'current':'update',keep,stale:keep?[]:names.filter(n=>n!==target.name),versions:versions.filter(Boolean).map(v=>v.join('.'))};
+}
+export async function prepareInstallation(client,{endweave=ENDWEAVE_BUNDLED}={}){
  const overview=await client.call('server_overview');const info=overview.info;
  if(!info||typeof info.id!=='string'||typeof info.game!=='string'||typeof info.server_type!=='string')fail('unverified');
  const server={id:info.id,name:typeof info.name==='string'?info.name.slice(0,100):'MCSV',game:info.game,serverType:info.server_type,identifier:typeof info.pelican_identifier==='string'&&/^[0-9a-f]{8}$/.test(info.pelican_identifier.toLowerCase())?info.pelican_identifier.toLowerCase():null};
@@ -85,15 +94,21 @@ export async function prepareInstallation(client){
  const wheels=pluginFiles.filter(f=>f.is_file&&/^endstone_mumble_host-.*\.whl$/i.test(f.name));
  const pluginVersions=wheels.map(f=>{const m=/^endstone_mumble_host-(\d+)\.(\d+)\.(\d+)-py3-none-any\.whl$/.exec(f.name);if(!m)fail('existing_plugin');const v=m.slice(1).map(Number);if(compareVersion(v,PLUGIN_VERSION)>0)fail('newer_version');return v;});
  const obsoletePlugins=wheels.filter(f=>f.name!==WHEEL).map(f=>f.name);
- if(obsoletePlugins.length&&!allowed('files_delete'))return {compatible:true,server,installAllowed:false,missingTools:['files_delete']};
- if(pluginFiles.some(f=>f.name==='mumble_host'&&!f.is_file)){const entries=await listing(client,'/plugins/mumble_host');if(entries.some(f=>f.name==='config.toml'&&f.is_file)){config=await read(client,'/plugins/mumble_host/config.toml');configEdit(config,ports[0]);}}
+ const endweaveFiles=pluginFiles.filter(f=>f.is_file&&ENDWEAVE_FILE.test(f.name)).map(f=>f.name);const weave=endweaveChange(endweaveFiles,endweave);
+ if((obsoletePlugins.length||weave.stale.length)&&!allowed('files_delete'))return {compatible:true,server,installAllowed:false,missingTools:['files_delete']};
+ let licenseText=null;
+ if(pluginFiles.some(f=>f.name==='mumble_host'&&!f.is_file)){const entries=await listing(client,'/plugins/mumble_host');if(entries.some(f=>f.name==='config.toml'&&f.is_file)){config=await read(client,'/plugins/mumble_host/config.toml');configEdit(config,ports[0]);}if(entries.some(f=>f.name==='license.json'&&f.is_file))licenseText=await read(client,'/plugins/mumble_host/license.json');}
+ const license=licenseText===null?'missing':verifyLicense(licenseText,server.identifier||'');
  const domain=await client.call('domain_info');const host=domain.node_hostname;if(typeof host!=='string'||!/^[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*\.mcsv\.me$/.test(host))fail('unverified');server.host=host;
  const configuredPort=config?.match(/^\s*\[mumble\][\s\S]*?^\s*port\s*=\s*(\d+)/m)?.[1];
  const voicePort=ports.includes(Number(configuredPort))?Number(configuredPort):ports.includes(18655)?18655:ports[0];
  const present=Boolean(wheels.length||Object.keys(existing).length);
- const current=wheels.length===1&&wheels[0].name===WHEEL&&PACKS.every(p=>existing[p.type]&&compareVersion(versions[p.type],VERSION)===0&&JSON.parse(packLists[p.type].content).some(e=>e.pack_id.toLowerCase()===p.uuid&&compareVersion(e.version,VERSION)===0));
- const installation={present,status:current?'current':present?'update':'absent',pluginVersions:pluginVersions.map(v=>v.join('.')),addonVersions:Object.fromEntries(Object.entries(versions).map(([k,v])=>[k,v.join('.')])),latest:{plugin:PLUGIN_VERSION.join('.'),addon:VERSION.join('.')}};
- return {compatible:true,server,installAllowed:true,world,ports,voicePort,installation,state:overview.runtime?.current_state||'unknown',canStart:allowed('power_action'),internal:{existing,packLists,config,root,pluginFiles,obsoletePlugins}};
+ const plugin=wheels.length===1&&wheels[0].name===WHEEL?'current':wheels.length?'update':'absent';
+ const addon=PACKS.every(p=>existing[p.type]&&compareVersion(versions[p.type],VERSION)===0&&JSON.parse(packLists[p.type].content).some(e=>e.pack_id.toLowerCase()===p.uuid&&compareVersion(e.version,VERSION)===0))?'current':Object.keys(existing).length?'update':'absent';
+ // 'unknown' means the website cannot check signatures (no key); the install itself refuses in that case.
+ const current=plugin==='current'&&addon==='current'&&['current','newer'].includes(weave.status)&&['valid','unknown'].includes(license);
+ const installation={present,status:current?'current':present?'update':'absent',parts:{plugin,addon,endweave:weave.status,license},pluginVersions:pluginVersions.map(v=>v.join('.')),addonVersions:Object.fromEntries(Object.entries(versions).map(([k,v])=>[k,v.join('.')])),endweaveVersions:weave.versions,latest:{plugin:PLUGIN_VERSION.join('.'),addon:VERSION.join('.'),endweave:publicEndweave(endweave)}};
+ return {compatible:true,server,installAllowed:true,world,ports,voicePort,installation,state:overview.runtime?.current_state||'unknown',canStart:allowed('power_action'),internal:{existing,packLists,config,root,pluginFiles,obsoletePlugins,endweaveFiles,canDelete:allowed('files_delete')}};
 }
 export function publicPlan(plan){const {internal,...publicData}=plan;return publicData;}
 export async function fetchArtifacts(request,release){
@@ -106,9 +121,9 @@ export function packArchive(source,targets){
  const files={};for(const pack of PACKS){const target=targets[pack.type]||pack.type+'_packs/'+pack.folder;if(typeof target!=='string'||target.length>512||target.split('/').some(p=>!validName(p)))fail('unsafe_layout');for(const [name,data] of Object.entries(source.packs[pack.type]))files[target+'/'+name]=data;}
  return Buffer.from(zipSync(files,{level:6,mtime:new Date('2020-01-01T00:00:00Z')}));
 }
-async function transfer(client,source,path,bytes,targets){
+async function transfer(client,source,path,bytes,{targets=null,kind=targets?'packs':'plugin',params={}}={}){
  if(!source.transferOrigin){await client.call('files_upload_base64',{path,content_base64:bytes.toString('base64')});return;}
- const url=new URL('/api/mcsv/artifact',source.transferOrigin);url.searchParams.set('kind',targets?'packs':'plugin');url.searchParams.set('version',VERSION.join('.'));if(targets)for(const pack of PACKS)if(targets[pack.type])url.searchParams.set(pack.type,targets[pack.type]);
+ const url=new URL('/api/mcsv/artifact',source.transferOrigin);url.searchParams.set('kind',kind);url.searchParams.set('version',VERSION.join('.'));for(const [key,value] of Object.entries(params))url.searchParams.set(key,value);if(targets)for(const pack of PACKS)if(targets[pack.type])url.searchParams.set(pack.type,targets[pack.type]);
  const at=path.lastIndexOf('/');await client.call('files_fetch_url',{directory:path.slice(0,at)||'/',filename:path.slice(at+1),url:url.toString()});
  const result=await client.call('files_read_base64',{path});if(typeof result.content_base64!=='string'||createHash('sha256').update(Buffer.from(result.content_base64,'base64')).digest('hex')!==createHash('sha256').update(bytes).digest('hex'))fail('verification_failed');
 }
@@ -122,8 +137,8 @@ export function backupGroups(paths){
  }
  return [...groups].map(([root,files])=>({root,files:[...files]}));
 }
-export async function installOnMCSV(client,body,loadArtifacts,authorize=async()=>{},progress=async()=>{}){
- const plan=await prepareInstallation(client);if(!plan.compatible)fail('incompatible');if(!plan.installAllowed)fail('permission');
+export async function installOnMCSV(client,body,loadArtifacts,authorize=async()=>{},progress=async()=>{},options={}){
+ const plan=await prepareInstallation(client,options);if(!plan.compatible)fail('incompatible');if(!plan.installAllowed)fail('permission');
  if(plan.server.id!==body.serverId||plan.world!==body.world)fail('server_changed');
  if(!['offline','running'].includes(plan.state))fail('server_running');
  if(!plan.ports.includes(body.voicePort))fail('invalid_port');
@@ -134,7 +149,11 @@ export async function installOnMCSV(client,body,loadArtifacts,authorize=async()=
  let stage='download',mutated=false;
  try{
   const source=await loadArtifacts();const internal=plan.internal;
+  // The install may fall back to the bundled Endweave, so decide against the file actually loaded.
+  const weave=source.endweave;if(!weave?.info||!Buffer.isBuffer(weave.bytes)||!ENDWEAVE_FILE.test(weave.info.name)||!validName(weave.info.name))fail('artifact_unavailable');
+  const weaveChange=endweaveChange(internal.endweaveFiles,weave.info);if(weaveChange.stale.length&&!internal.canDelete)fail('permission');
   const backupFiles=Object.values(internal.packLists).filter(p=>p.exists).map(p=>p.path.slice(1));
+  if(!weaveChange.keep)for(const name of internal.endweaveFiles)backupFiles.push('plugins/'+name);
   for(const path of Object.values(internal.existing))backupFiles.push(path);
   if(internal.config!==null)backupFiles.push('plugins/mumble_host/config.toml');
   for(const f of internal.pluginFiles.filter(f=>f.is_file&&/^endstone_mumble_host-.*\.whl$/i.test(f.name)))backupFiles.push('plugins/'+f.name);
@@ -145,18 +164,20 @@ export async function installOnMCSV(client,body,loadArtifacts,authorize=async()=
   // Install files before restarting; reject a server already changing power state.
   const runtime=await client.call('server_overview');if(runtime.info?.id!==plan.server.id||!['offline','running'].includes(runtime.runtime?.current_state))fail('server_running');
   stage='packs';const archiveBytes=packArchive(source,internal.existing);
-  const archive='SleepyMumla-packs-'+randomUUID()+'.zip';mutated=true;stage='packs_upload';await transfer(client,source,'/'+archive,archiveBytes,internal.existing);stage='packs_extract';await client.call('files_decompress',{root:'/',file:archive});
+  const archive='SleepyMumla-packs-'+randomUUID()+'.zip';mutated=true;stage='packs_upload';await transfer(client,source,'/'+archive,archiveBytes,{targets:internal.existing});stage='packs_extract';await client.call('files_decompress',{root:'/',file:archive});
   stage='plugin';mutated=true;await transfer(client,source,'/plugins/'+WHEEL,source.wheel);if(internal.obsoletePlugins.length)await client.call('files_delete',{root:'/plugins',files:internal.obsoletePlugins});
+  stage='endweave';if(!weaveChange.keep){await transfer(client,source,'/plugins/'+weave.info.name,weave.bytes,{kind:'endweave',params:{sha:weave.info.sha256}});if(weaveChange.stale.length)await client.call('files_delete',{root:'/plugins',files:weaveChange.stale});}
   stage='config';const configPath='/plugins/mumble_host/config.toml';if(internal.config!==null){const edit=configEdit(internal.config,body.voicePort);if(edit.old_string!==edit.new_string)await client.call('files_edit',{path:configPath,edits:[edit]});}else await client.call('files_write',{path:configPath,force_new:true,content:'[tracking]\ninterval_ticks = 4\nposition_epsilon = 0.05\nrotation_epsilon = 1.0\nheartbeat_seconds = 2\n\n[mumble]\nport = '+body.voicePort+'\nusers = 99\n\n[local_state]\nhost = "127.0.0.1"\nport = 47855\nmax_queue = 4096\n\n[voice]\ndefault_range = 30\nmax_range = 60\ndefault_attenuation_level = 3\n'});
   stage='license';if(!licenseEnabled())fail('license_unavailable');if(!/^[0-9a-f]{8}$/.test(plan.server.identifier||''))fail('license_unavailable');const licenseText=signLicense({server:plan.server.identifier,port:body.voicePort,users:LICENSE_USERS,issued:issuedToday()});await client.call('files_write',{path:'/plugins/mumble_host/license.json',force_new:false,content:licenseText});
   stage='world';for(const pack of PACKS){const item=internal.packLists[pack.type],content=mergePacks(item.content,pack.uuid);if(item.exists){if(item.content!==content)await client.call('files_edit',{path:item.path,edits:[{old_string:item.content,new_string:content}]});}else await client.call('files_write',{path:item.path,content});}
   stage='verify';for(const pack of PACKS){const list=JSON.parse(await read(client,internal.packLists[pack.type].path));if(!list.some(p=>p.pack_id===pack.uuid&&JSON.stringify(p.version)===JSON.stringify(VERSION)))fail('verification_failed');const target=internal.existing[pack.type]||pack.type+'_packs/'+pack.folder;const manifest=JSON.parse(await read(client,'/'+target+'/manifest.json'));if(manifest.header?.uuid!==pack.uuid)fail('verification_failed');}
   await progress('addon');const files=await listing(client,'/plugins');if(!files.some(f=>f.name===WHEEL&&f.size===source.wheel.length))fail('verification_failed');
+  if(!weaveChange.keep){if(!files.some(f=>f.name===weave.info.name&&f.size===weave.bytes.length)||files.some(f=>weaveChange.stale.includes(f.name)))fail('verification_failed');const copy=await client.call('files_read_base64',{path:'/plugins/'+weave.info.name});if(typeof copy.content_base64!=='string'||createHash('sha256').update(Buffer.from(copy.content_base64,'base64')).digest('hex')!==createHash('sha256').update(weave.bytes).digest('hex'))fail('verification_failed');}
   const uploaded=await client.call('files_read_base64',{path:'/plugins/'+WHEEL});if(typeof uploaded.content_base64!=='string'||createHash('sha256').update(Buffer.from(uploaded.content_base64,'base64')).digest('hex')!==createHash('sha256').update(source.wheel).digest('hex'))fail('verification_failed');
   const confirmed=await read(client,configPath);const edit=configEdit(confirmed,body.voicePort);if(edit.old_string!==edit.new_string)fail('verification_failed');
   if(await read(client,'/plugins/mumble_host/license.json')!==licenseText)fail('verification_failed');
   await progress('plugin');stage='restart';const beforePower=await client.call('server_overview');if(beforePower.info?.id!==plan.server.id||!['running','offline'].includes(beforePower.runtime?.current_state))fail('server_running');const action=beforePower.runtime.current_state==='running'?'restart':'start';const previousUptime=beforePower.runtime.resources?.uptime;await client.call('power_action',{action});
-  return {installed:true,started:true,powerAction:action,previousUptime:Number.isFinite(previousUptime)?previousUptime:null,server:{id:plan.server.id,name:plan.server.name,host:plan.server.host},world:plan.world,voicePort:body.voicePort,backup:backups[0]||null,backups,pluginVersion:'0.6.1',addonVersion:VERSION.join('.'),licensed:true};
+  return {installed:true,started:true,powerAction:action,previousUptime:Number.isFinite(previousUptime)?previousUptime:null,server:{id:plan.server.id,name:plan.server.name,host:plan.server.host},world:plan.world,voicePort:body.voicePort,backup:backups[0]||null,backups,pluginVersion:PLUGIN_VERSION.join('.'),addonVersion:VERSION.join('.'),endweaveVersion:weaveChange.keep?(weaveChange.versions.at(-1)||null):weave.info.version.join('.'),licensed:true};
  }catch(error){if(!(error instanceof MCSVError))error=new MCSVError('install_failed');error.stage=stage;error.partial=mutated;throw error;}finally{active.delete(plan.server.id);}
 }
 
