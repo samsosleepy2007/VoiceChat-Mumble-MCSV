@@ -1,2 +1,2 @@
 f7c46c34f00629a03d4d5e0d3556e1e265b65f95ef1fe185a3912422aaa35c4a  addon/VC_Mumble_ItemMic_v2.15.44_protected.mcaddon
-46d81b566857fb0162df4c99faf263172d404b537b7a11777ce48626771d072b  plugin/endstone_mumble_host-0.5.5-py3-none-any.whl
+bb15215321bf70f8b26a35ab16d244084f81c8fbdd6529314d9f195cb62adfdb  plugin/endstone_mumble_host-0.6.0-py3-none-any.whl

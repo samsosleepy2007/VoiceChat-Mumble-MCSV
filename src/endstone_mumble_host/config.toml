@@ -6,7 +6,7 @@ heartbeat_seconds = 2
 
 [mumble]
 port = 18655
-users = 20
+users = 99
 
 [local_state]
 host = "127.0.0.1"

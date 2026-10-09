@@ -14,6 +14,7 @@ from endstone.form import ActionForm
 from endstone.plugin import Plugin
 
 from .host import MumbleRuntimeHost
+from .license import load_license, LicenseError
 from .listener import MumbleHostListener
 from .local_state import LocalStateSink
 from .model import PlayerState
@@ -30,7 +31,7 @@ ATTENUATION_LEVELS: dict[int, str] = {
 
 class MumbleHost(Plugin):
     prefix = "MumbleHost"
-    version = "0.5.5"
+    version = "0.6.0"
     api_version = "0.11"
     description = "Unified MCSV Mumble server + Item Mic proximity + SleepyPhone call routing"
     authors = ["SamSoSleepy"]
@@ -74,7 +75,8 @@ class MumbleHost(Plugin):
         self._max_range = 150
         self._default_attenuation_level = 3
         self._mumble_port = 18655
-        self._mumble_users = 20
+        self._mumble_users = 99
+        self._license: Any = None
         self._last_host_running = False
 
     def on_enable(self) -> None:
@@ -86,14 +88,20 @@ class MumbleHost(Plugin):
             )
         self._install_performance_monitor()
         self.save_default_config()
+        self._apply_license()
         self._load_settings()
         self._load_bindings()
         self.register_events(MumbleHostListener(self))
 
         if self._state_sink is not None:
             self._state_sink.start()
-        if self._host is not None:
+        if self._host is not None and self._license is not None:
             self._host.start()
+        elif self._license is None:
+            self.logger.warning(
+                "Mumble voice server not started: no valid license for this server. "
+                "Reinstall from the SleepyMumla website to activate voice."
+            )
 
         self.server.scheduler.run_task(
             self,
@@ -145,6 +153,20 @@ class MumbleHost(Plugin):
         self._calls.clear()
         self.logger.info("MumbleHost Unified disabled")
 
+    def _apply_license(self) -> None:
+        self._license = None
+        try:
+            self._license = load_license(self.data_folder / "license.json")
+            self.logger.info(
+                f"MumbleHost license OK: server={self._license.server} "
+                f"port={self._license.port} users={self._license.users}"
+            )
+        except LicenseError as exc:
+            self.logger.error(
+                f"MumbleHost license check failed ({exc.code}): {exc}. "
+                "Voice is disabled until a valid license is installed."
+            )
+
     def _load_settings(self) -> None:
         tracking = self.config.get("tracking", {})
         mumble = self.config.get("mumble", {})
@@ -182,8 +204,11 @@ class MumbleHost(Plugin):
             mumble.get("port", 18655), 1, 65535, 18655
         )
         self._mumble_users = self._bounded_int(
-            mumble.get("users", 20), 1, 500, 20
+            mumble.get("users", 99), 1, 500, 99
         )
+        if self._license is not None:
+            self._mumble_port = self._license.port
+            self._mumble_users = self._license.users
 
         state_host = str(local_state.get("host", "127.0.0.1")).strip()
         if state_host not in {"127.0.0.1", "localhost"}:

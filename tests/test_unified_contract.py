@@ -19,9 +19,9 @@ host = HOST.read_text(encoding="utf-8")
 config = tomllib.loads(CONFIG.read_text(encoding="utf-8"))
 project = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
 
-assert project["project"]["version"] == "0.5.5"
+assert project["project"]["version"] == "0.6.0"
 assert "class MumbleHost(Plugin):" in plugin
-assert 'version = "0.5.5"' in plugin
+assert 'version = "0.6.0"' in plugin
 assert "BridgeRelay" not in plugin
 assert "bridge_relay" not in plugin
 assert '"vcmumble.mic.on"' in plugin
@@ -37,6 +37,7 @@ assert config["voice"]["max_range"] == 60
 assert config["local_state"]["host"] == "127.0.0.1"
 assert config["local_state"]["port"] == 47855
 assert config["mumble"]["port"] == 18655
+assert config["mumble"]["users"] == 99
 assert 'resources.files("endstone_mumble_host")' in host
 
 spec = importlib.util.spec_from_file_location("mumblehost_local_state_test", STATE)
@@ -78,4 +79,4 @@ assert json.loads(data.decode("utf-8")) == payload
 sink.stop()
 receiver.close()
 
-print("MumbleHost unified v0.5.5 contract: OK")
+print("MumbleHost unified v0.6.0 contract: OK")

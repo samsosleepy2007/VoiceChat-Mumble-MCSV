@@ -1,11 +1,12 @@
 import { createHash,randomUUID } from 'node:crypto';
 import { unzipSync,zipSync } from 'fflate';
 import { MCSVError } from './mcsv.js';
+import { signLicense, licenseEnabled, LICENSE_USERS, issuedToday } from './license.js';
 
-export const WHEEL='endstone_mumble_host-0.5.5-py3-none-any.whl';
+export const WHEEL='endstone_mumble_host-0.6.0-py3-none-any.whl';
 export const PACKS=[{type:'behavior',uuid:'b6411120-cc4e-44a9-b28d-f43b10cafd86',folder:'SleepyMumla_BP'},{type:'resource',uuid:'cb345edb-6e6c-49ac-9950-e2ae07bda214',folder:'SleepyMumla_RP'}];
 const VERSION=[2,15,44];
-const PLUGIN_VERSION=[0,5,5];
+const PLUGIN_VERSION=[0,6,0];
 function compareVersion(a,b){if(!Array.isArray(a)||a.length!==3||a.some(n=>!Number.isSafeInteger(n)||n<0))fail('existing_version');for(let i=0;i<3;i++)if(a[i]!==b[i])return a[i]>b[i]?1:-1;return 0;}
 const REQUIRED=['server_overview','files_list','files_read','files_read_many','files_read_base64','files_fetch_url','files_decompress','files_write','files_edit','files_compress','domain_info','power_action'];
 const validName=name=>typeof name==='string'&&name.length>0&&name!=='.'&&name!=='..'&&!/[\\/\x00-\x1f]/.test(name);
@@ -28,7 +29,7 @@ async function read(client,path){const data=await client.call('files_read',{path
 export function mergePacks(text,uuid){let data;try{data=JSON.parse(text);}catch{fail('invalid_pack_list');}if(!Array.isArray(data)||data.some(p=>!p||typeof p.pack_id!=='string'||!Array.isArray(p.version)))fail('invalid_pack_list');const other=data.filter(p=>p.pack_id.toLowerCase()!==uuid);const prior=data.find(p=>p.pack_id.toLowerCase()===uuid);other.push({...prior,pack_id:uuid,version:VERSION});return JSON.stringify(other,null,2)+'\n';}
 export function configEdit(text,port){
  const sections=[...text.matchAll(/^\s*\[mumble\][^\S\r\n]*(?:#.*)?$/gm)];if(sections.length>1)fail('invalid_config');
- if(!sections.length)return {old_string:text,new_string:text+'\n[mumble]\nport = '+port+'\nusers = 20\n'};
+ if(!sections.length)return {old_string:text,new_string:text+'\n[mumble]\nport = '+port+'\nusers = 99\n'};
  const start=sections[0].index,end=text.slice(start+sections[0][0].length).search(/^\s*\[/m);const section=text.slice(start,end<0?undefined:start+sections[0][0].length+end);
  const lines=[...section.matchAll(/^[ \t]*port[ \t]*=[^\r\n]*/gm)];if(lines.length>1)fail('invalid_config');
  if(lines.length){if(!/^[ \t]*port[ \t]*=[ \t]*\d+[ \t]*(?:#.*)?$/.test(lines[0][0]))fail('invalid_config');const old=lines[0][0];return {old_string:section,new_string:section.replace(old,old.replace(/(=[ \t]*)\d+/,'$1'+port))};}
@@ -63,7 +64,7 @@ async function findExisting(client,root,worldFiles,world){
 export async function prepareInstallation(client){
  const overview=await client.call('server_overview');const info=overview.info;
  if(!info||typeof info.id!=='string'||typeof info.game!=='string'||typeof info.server_type!=='string')fail('unverified');
- const server={id:info.id,name:typeof info.name==='string'?info.name.slice(0,100):'MCSV',game:info.game,serverType:info.server_type};
+ const server={id:info.id,name:typeof info.name==='string'?info.name.slice(0,100):'MCSV',game:info.game,serverType:info.server_type,identifier:typeof info.pelican_identifier==='string'&&/^[0-9a-f]{8}$/.test(info.pelican_identifier.toLowerCase())?info.pelican_identifier.toLowerCase():null};
  if(info.game!=='minecraft-bedrock'||info.server_type!=='endstone')return {compatible:false,server};
  const catalog=await client.catalog();if(!Array.isArray(catalog.tools))fail('unverified');
  const allowed=name=>catalog.tools.some(t=>t.name===name&&t.allowed===true&&t.applicable!==false);
@@ -96,7 +97,7 @@ export async function prepareInstallation(client){
 }
 export function publicPlan(plan){const {internal,...publicData}=plan;return publicData;}
 export async function fetchArtifacts(request,release){
- const definitions=[{name:'plugin/'+WHEEL,hash:'46d81b566857fb0162df4c99faf263172d404b537b7a11777ce48626771d072b'},{name:'addon/VC_Mumble_ItemMic_v2.15.44_protected.mcaddon',hash:'f7c46c34f00629a03d4d5e0d3556e1e265b65f95ef1fe185a3912422aaa35c4a'}];
+ const definitions=[{name:'plugin/'+WHEEL,hash:'bb15215321bf70f8b26a35ab16d244084f81c8fbdd6529314d9f195cb62adfdb'},{name:'addon/VC_Mumble_ItemMic_v2.15.44_protected.mcaddon',hash:'f7c46c34f00629a03d4d5e0d3556e1e265b65f95ef1fe185a3912422aaa35c4a'}];
  const bytes=[];for(const item of definitions){let response;try{response=await request(release+item.name,{signal:AbortSignal.timeout(30000)});}catch{fail('artifact_unavailable');}if(!response.ok)fail('artifact_unavailable');const buffer=Buffer.from(await response.arrayBuffer());if(buffer.length>4000000||createHash('sha256').update(buffer).digest('hex')!==item.hash)fail('artifact_integrity');bytes.push(buffer);}
  const addon=unzipSync(bytes[1]);const packs={};for(const pack of PACKS){const entry=Object.keys(addon).find(n=>n==='SleepyMumla_'+(pack.type==='behavior'?'BP':'RP')+'.mcpack'&&n.endsWith('.mcpack'));if(!entry)fail('artifact_integrity');const files=unzipSync(addon[entry]);const manifest=JSON.parse(Buffer.from(files['manifest.json']).toString());if(manifest.header.uuid!==pack.uuid||JSON.stringify(manifest.header.version)!==JSON.stringify(VERSION))fail('artifact_integrity');if(Object.keys(files).some(n=>n.startsWith('/')||n.includes('\\')||n.split('/').some(p=>p==='..'||p==='.'||!p)))fail('artifact_integrity');packs[pack.type]=files;}
  return {wheel:bytes[0],packs};
@@ -146,14 +147,16 @@ export async function installOnMCSV(client,body,loadArtifacts,authorize=async()=
   stage='packs';const archiveBytes=packArchive(source,internal.existing);
   const archive='SleepyMumla-packs-'+randomUUID()+'.zip';mutated=true;stage='packs_upload';await transfer(client,source,'/'+archive,archiveBytes,internal.existing);stage='packs_extract';await client.call('files_decompress',{root:'/',file:archive});
   stage='plugin';mutated=true;await transfer(client,source,'/plugins/'+WHEEL,source.wheel);if(internal.obsoletePlugins.length)await client.call('files_delete',{root:'/plugins',files:internal.obsoletePlugins});
-  stage='config';const configPath='/plugins/mumble_host/config.toml';if(internal.config!==null){const edit=configEdit(internal.config,body.voicePort);if(edit.old_string!==edit.new_string)await client.call('files_edit',{path:configPath,edits:[edit]});}else await client.call('files_write',{path:configPath,force_new:true,content:'[tracking]\ninterval_ticks = 4\nposition_epsilon = 0.05\nrotation_epsilon = 1.0\nheartbeat_seconds = 2\n\n[mumble]\nport = '+body.voicePort+'\nusers = 20\n\n[local_state]\nhost = "127.0.0.1"\nport = 47855\nmax_queue = 4096\n\n[voice]\ndefault_range = 30\nmax_range = 60\ndefault_attenuation_level = 3\n'});
+  stage='config';const configPath='/plugins/mumble_host/config.toml';if(internal.config!==null){const edit=configEdit(internal.config,body.voicePort);if(edit.old_string!==edit.new_string)await client.call('files_edit',{path:configPath,edits:[edit]});}else await client.call('files_write',{path:configPath,force_new:true,content:'[tracking]\ninterval_ticks = 4\nposition_epsilon = 0.05\nrotation_epsilon = 1.0\nheartbeat_seconds = 2\n\n[mumble]\nport = '+body.voicePort+'\nusers = 99\n\n[local_state]\nhost = "127.0.0.1"\nport = 47855\nmax_queue = 4096\n\n[voice]\ndefault_range = 30\nmax_range = 60\ndefault_attenuation_level = 3\n'});
+  stage='license';if(!licenseEnabled())fail('license_unavailable');if(!/^[0-9a-f]{8}$/.test(plan.server.identifier||''))fail('license_unavailable');const licenseText=signLicense({server:plan.server.identifier,port:body.voicePort,users:LICENSE_USERS,issued:issuedToday()});await client.call('files_write',{path:'/plugins/mumble_host/license.json',force_new:false,content:licenseText});
   stage='world';for(const pack of PACKS){const item=internal.packLists[pack.type],content=mergePacks(item.content,pack.uuid);if(item.exists){if(item.content!==content)await client.call('files_edit',{path:item.path,edits:[{old_string:item.content,new_string:content}]});}else await client.call('files_write',{path:item.path,content});}
   stage='verify';for(const pack of PACKS){const list=JSON.parse(await read(client,internal.packLists[pack.type].path));if(!list.some(p=>p.pack_id===pack.uuid&&JSON.stringify(p.version)===JSON.stringify(VERSION)))fail('verification_failed');const target=internal.existing[pack.type]||pack.type+'_packs/'+pack.folder;const manifest=JSON.parse(await read(client,'/'+target+'/manifest.json'));if(manifest.header?.uuid!==pack.uuid)fail('verification_failed');}
   await progress('addon');const files=await listing(client,'/plugins');if(!files.some(f=>f.name===WHEEL&&f.size===source.wheel.length))fail('verification_failed');
   const uploaded=await client.call('files_read_base64',{path:'/plugins/'+WHEEL});if(typeof uploaded.content_base64!=='string'||createHash('sha256').update(Buffer.from(uploaded.content_base64,'base64')).digest('hex')!==createHash('sha256').update(source.wheel).digest('hex'))fail('verification_failed');
   const confirmed=await read(client,configPath);const edit=configEdit(confirmed,body.voicePort);if(edit.old_string!==edit.new_string)fail('verification_failed');
+  if(await read(client,'/plugins/mumble_host/license.json')!==licenseText)fail('verification_failed');
   await progress('plugin');stage='restart';const beforePower=await client.call('server_overview');if(beforePower.info?.id!==plan.server.id||!['running','offline'].includes(beforePower.runtime?.current_state))fail('server_running');const action=beforePower.runtime.current_state==='running'?'restart':'start';const previousUptime=beforePower.runtime.resources?.uptime;await client.call('power_action',{action});
-  return {installed:true,started:true,powerAction:action,previousUptime:Number.isFinite(previousUptime)?previousUptime:null,server:{id:plan.server.id,name:plan.server.name,host:plan.server.host},world:plan.world,voicePort:body.voicePort,backup:backups[0]||null,backups,pluginVersion:'0.5.5',addonVersion:VERSION.join('.')};
+  return {installed:true,started:true,powerAction:action,previousUptime:Number.isFinite(previousUptime)?previousUptime:null,server:{id:plan.server.id,name:plan.server.name,host:plan.server.host},world:plan.world,voicePort:body.voicePort,backup:backups[0]||null,backups,pluginVersion:'0.6.0',addonVersion:VERSION.join('.'),licensed:true};
  }catch(error){if(!(error instanceof MCSVError))error=new MCSVError('install_failed');error.stage=stage;error.partial=mutated;throw error;}finally{active.delete(plan.server.id);}
 }
 
