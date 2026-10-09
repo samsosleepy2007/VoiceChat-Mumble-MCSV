@@ -28,7 +28,7 @@ assert.throws(()=>signArtifact(params,{env:{}}),e=>e.code==='artifact_unavailabl
 async function get(query){let status,body,cache;await artifactHandler({method:'GET',url:'/api/mcsv/artifact?'+new URLSearchParams(query)},{setHeader(k,v){if(k==='Cache-Control')cache=v;},status(c){status=c;return this;},send(b){body=b;return this;},end(){return this;}});return {status,body,cache};}
 assert.equal((await get(params)).status,403);
 const served=await get({...params,...signArtifact(params)});assert.equal(served.status,200);assert.equal(served.cache,'private, no-store');
-assert.equal(createHash('sha256').update(served.body).digest('hex'),'1299a4ac0acce147238d46482ce9779d03148e1b6007f9c115d854640040fb67');
+assert.equal(createHash('sha256').update(served.body).digest('hex'),'981d0250cdc7ad503e277c83a915359909eec90d42bcd6c6e338af92a34be855');
 console.log('PASS artifact links: signed, parameter-bound, five-minute expiry, unsigned refused, never publicly cached');
 
 // --- Free-install bypass: files on the server prove nothing ----------------------------------------

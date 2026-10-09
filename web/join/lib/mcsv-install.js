@@ -5,7 +5,7 @@ import { signLicense, licenseEnabled, verifyLicense, LICENSE_USERS, issuedToday 
 import { BUNDLED as ENDWEAVE_BUNDLED, endweaveVersion, publicEndweave } from './endweave.js';
 import { signArtifact } from './artifact-token.js';
 
-export const WHEEL='endstone_mumble_host-0.6.2-py3-none-any.whl';
+export const WHEEL='endstone_mumble_host-0.6.2-cp312-cp312-manylinux_2_28_x86_64.whl';
 export const PACKS=[{type:'behavior',uuid:'b6411120-cc4e-44a9-b28d-f43b10cafd86',folder:'SleepyMumla_BP'},{type:'resource',uuid:'cb345edb-6e6c-49ac-9950-e2ae07bda214',folder:'SleepyMumla_RP'}];
 const VERSION=[2,15,44];
 const PLUGIN_VERSION=[0,6,2];
@@ -93,7 +93,7 @@ export async function prepareInstallation(client,{endweave=ENDWEAVE_BUNDLED}={})
  const packLists={};for(const pack of PACKS){const filename='world_'+pack.type+'_packs.json';const exists=worldFiles.some(f=>f.name===filename&&f.is_file);const content=exists?await read(client,'/worlds/'+world+'/'+filename):'[]';mergePacks(content,pack.uuid);packLists[pack.type]={exists,content,path:'/worlds/'+world+'/'+filename};}
  let config=null;const pluginFolder=root.some(f=>f.name==='plugins'&&!f.is_file);const pluginFiles=pluginFolder?await listing(client,'/plugins'):[];
  const wheels=pluginFiles.filter(f=>f.is_file&&/^endstone_mumble_host-.*\.whl$/i.test(f.name));
- const pluginVersions=wheels.map(f=>{const m=/^endstone_mumble_host-(\d+)\.(\d+)\.(\d+)-py3-none-any\.whl$/.exec(f.name);if(!m)fail('existing_plugin');const v=m.slice(1).map(Number);if(compareVersion(v,PLUGIN_VERSION)>0)fail('newer_version');return v;});
+ const pluginVersions=wheels.map(f=>{const m=/^endstone_mumble_host-(\d+)\.(\d+)\.(\d+)-(?:py3-none-any|cp\d+-cp\d+-[\w.]+)\.whl$/.exec(f.name);if(!m)fail('existing_plugin');const v=m.slice(1).map(Number);if(compareVersion(v,PLUGIN_VERSION)>0)fail('newer_version');return v;});
  const obsoletePlugins=wheels.filter(f=>f.name!==WHEEL).map(f=>f.name);
  const endweaveFiles=pluginFiles.filter(f=>f.is_file&&ENDWEAVE_FILE.test(f.name)).map(f=>f.name);const weave=endweaveChange(endweaveFiles,endweave);
  if((obsoletePlugins.length||weave.stale.length)&&!allowed('files_delete'))return {compatible:true,server,installAllowed:false,missingTools:['files_delete']};
@@ -112,7 +112,7 @@ export async function prepareInstallation(client,{endweave=ENDWEAVE_BUNDLED}={})
 }
 export function publicPlan(plan){const {internal,...publicData}=plan;return publicData;}
 export async function fetchArtifacts(request,release){
- const definitions=[{name:'plugin/'+WHEEL,hash:'1299a4ac0acce147238d46482ce9779d03148e1b6007f9c115d854640040fb67'},{name:'addon/VC_Mumble_ItemMic_v2.15.44_protected.mcaddon',hash:'f7c46c34f00629a03d4d5e0d3556e1e265b65f95ef1fe185a3912422aaa35c4a'}];
+ const definitions=[{name:'plugin/'+WHEEL,hash:'981d0250cdc7ad503e277c83a915359909eec90d42bcd6c6e338af92a34be855'},{name:'addon/VC_Mumble_ItemMic_v2.15.44_protected.mcaddon',hash:'f7c46c34f00629a03d4d5e0d3556e1e265b65f95ef1fe185a3912422aaa35c4a'}];
  const bytes=[];for(const item of definitions){let response;try{response=await request(release+item.name,{signal:AbortSignal.timeout(30000)});}catch{fail('artifact_unavailable');}if(!response.ok)fail('artifact_unavailable');const buffer=Buffer.from(await response.arrayBuffer());if(buffer.length>4000000||createHash('sha256').update(buffer).digest('hex')!==item.hash)fail('artifact_integrity');bytes.push(buffer);}
  const addon=unzipSync(bytes[1]);const packs={};for(const pack of PACKS){const entry=Object.keys(addon).find(n=>n==='SleepyMumla_'+(pack.type==='behavior'?'BP':'RP')+'.mcpack'&&n.endsWith('.mcpack'));if(!entry)fail('artifact_integrity');const files=unzipSync(addon[entry]);const manifest=JSON.parse(Buffer.from(files['manifest.json']).toString());if(manifest.header.uuid!==pack.uuid||JSON.stringify(manifest.header.version)!==JSON.stringify(VERSION))fail('artifact_integrity');if(Object.keys(files).some(n=>n.startsWith('/')||n.includes('\\')||n.split('/').some(p=>p==='..'||p==='.'||!p)))fail('artifact_integrity');packs[pack.type]=files;}
  return {wheel:bytes[0],packs};
