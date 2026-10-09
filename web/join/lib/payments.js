@@ -3,6 +3,7 @@ import pg from 'pg';
 import generatePayload from 'promptpay-qr';
 import QRCode from 'qrcode';
 import { PaymentError,proof,checkSlip } from './payment-providers.js';
+import { alert } from './alerts.js';
 
 export { PaymentError };
 export const paymentsEnabled=()=>process.env.PAYMENTS_ENABLED==='true';
@@ -22,12 +23,13 @@ let pool;
 export function database(){if(!pool)pool=new pg.Pool({connectionString:process.env.PAYMENT_DATABASE_URL||process.env.DATABASE_URL,max:2,connectionTimeoutMillis:5000,idleTimeoutMillis:10000});return pool;}
 export function paymentStore(db=database()){
  return {
- async entitled(user,server){return Boolean((await db.query('SELECT 1 FROM sleepy_install_entitlements WHERE user_id=$1 AND server_id=$2',[user,server])).rowCount);},
- async installed(user,server){await db.query('UPDATE sleepy_install_entitlements SET installed_at=now() WHERE user_id=$1 AND server_id=$2 AND installed_at IS NULL',[user,server]);},
+ // A payment entitles the MCSV server, so any Discord account managing it can reinstall.
+ async entitled(server){return Boolean((await db.query('SELECT 1 FROM sleepy_install_entitlements WHERE server_id=$1 LIMIT 1',[server])).rowCount);},
+ async installed(server){await db.query('UPDATE sleepy_install_entitlements SET installed_at=now() WHERE server_id=$1 AND installed_at IS NULL',[server]);},
  async checkout(user,server,amount,serverName=null,userName=null){
   const c=await db.connect();try{
    await c.query('BEGIN');await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[user+':'+server]);
-   if((await c.query('SELECT 1 FROM sleepy_install_entitlements WHERE user_id=$1 AND server_id=$2',[user,server])).rowCount){await c.query('COMMIT');return {status:'paid'};}
+   if((await c.query('SELECT 1 FROM sleepy_install_entitlements WHERE server_id=$1 LIMIT 1',[server])).rowCount){await c.query('COMMIT');return {status:'paid'};}
    await c.query("UPDATE sleepy_payment_orders SET status='expired' WHERE user_id=$1 AND server_id=$2 AND status='pending' AND (expires_at<=now() OR amount_satang<>$3)",[user,server,amount]);
    const old=await c.query("SELECT * FROM sleepy_payment_orders WHERE user_id=$1 AND server_id=$2 AND status IN ('pending','verifying','review') ORDER BY created_at DESC LIMIT 1",[user,server]);
    const result=old.rowCount?old:await c.query(`INSERT INTO sleepy_payment_orders(id,user_id,server_id,amount_satang,server_name,user_name) VALUES($1,$2,$3,$4,$5,$6) RETURNING *`,[randomUUID(),user,server,amount,serverName,userName]);await c.query('COMMIT');return result.rows[0];
@@ -45,7 +47,7 @@ export function paymentStore(db=database()){
    const claim=await c.query(`INSERT INTO sleepy_payment_attempts(proof_key,order_id,method) VALUES($1,$2,$3)
     ON CONFLICT(proof_key) DO UPDATE SET status='verifying',error_code=NULL,created_at=now()
     WHERE sleepy_payment_attempts.order_id=EXCLUDED.order_id AND sleepy_payment_attempts.status='rejected'
-    AND sleepy_payment_attempts.error_code='slip_delay' AND sleepy_payment_attempts.created_at<now()-interval '10 minutes' RETURNING proof_key`,[key,id,method]);
+    AND ((sleepy_payment_attempts.error_code='slip_delay' AND sleepy_payment_attempts.created_at<now()-interval '10 minutes') OR sleepy_payment_attempts.error_code='payment_retry') RETURNING proof_key`,[key,id,method]);
    if(!claim.rowCount)throw new PaymentError('payment_duplicate');
    await c.query("UPDATE sleepy_payment_orders SET status='verifying' WHERE id=$1",[id]);await c.query('COMMIT');return o;
   }catch(e){await c.query('ROLLBACK');if(e.code==='23505')throw new PaymentError('payment_duplicate');throw e;}finally{c.release();}
@@ -59,6 +61,34 @@ export function paymentStore(db=database()){
    await c.query('COMMIT');
   }catch(e){await c.query('ROLLBACK');throw new PaymentError('payment_review',true);}finally{c.release();}
  },
+ // Operator actions for orders SlipOK could not settle (tools/payments-admin.mjs). 'paid' is only for
+ // money the operator has seen arrive in the bank account; 'retry' lets the customer resend the same slip.
+ async review(){return (await db.query("SELECT o.id,o.user_id,o.user_name,o.server_id,o.server_name,o.amount_satang,o.status,o.created_at,a.method,a.error_code FROM sleepy_payment_orders o LEFT JOIN sleepy_payment_attempts a ON a.order_id=o.id AND a.status IN ('review','verifying') WHERE o.status IN ('review','verifying') AND o.created_at<now()-interval '2 minutes' ORDER BY o.created_at")).rows;},
+ async resolve(id,outcome,note){
+  if(!['paid','retry'].includes(outcome)||typeof note!=='string'||!/^[\w .:#/-]{3,80}$/.test(note))throw new PaymentError('format');
+  const c=await db.connect();try{
+   await c.query('BEGIN');const o=(await c.query("SELECT * FROM sleepy_payment_orders WHERE id=$1 FOR UPDATE",[id])).rows[0];
+   if(!o||!['review','verifying'].includes(o.status))throw new PaymentError('payment_order');
+   if(outcome==='retry'){await c.query("UPDATE sleepy_payment_attempts SET status='rejected',error_code='payment_retry' WHERE order_id=$1 AND status IN ('review','verifying')",[id]);await c.query("UPDATE sleepy_payment_orders SET status='pending',expires_at=now()+interval '30 minutes' WHERE id=$1",[id]);}
+   else{
+    const a=(await c.query("SELECT proof_key,method FROM sleepy_payment_attempts WHERE order_id=$1 AND status IN ('review','verifying') ORDER BY created_at DESC LIMIT 1",[id])).rows[0];
+    if(a)await c.query("UPDATE sleepy_payment_attempts SET status='paid',provider_reference=$2,amount_satang=$3 WHERE proof_key=$1",[a.proof_key,'manual:'+note,o.amount_satang]);
+    await c.query("UPDATE sleepy_payment_orders SET status='paid',paid_at=now(),purchase_number=nextval('sleepy_purchase_sequence'),payment_method=$2,installation_state='waiting' WHERE id=$1",[id,a?.method||null]);
+    await c.query('INSERT INTO sleepy_install_entitlements(user_id,server_id,order_id,installed_at) VALUES($1,$2,$3,NULL) ON CONFLICT(user_id,server_id) DO UPDATE SET order_id=EXCLUDED.order_id,installed_at=NULL',[o.user_id,o.server_id,id]);
+   }
+   await c.query('COMMIT');return outcome;
+  }catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}
+ },
+ // Entitle a server that was installed before payments existed (or comped by the operator).
+ async grant(server,note,amount=100){
+  if(typeof server!=='string'||!/^[\w-]{8,64}$/.test(server)||typeof note!=='string'||!/^[\w .:#/-]{3,80}$/.test(note))throw new PaymentError('format');
+  const c=await db.connect();try{
+   await c.query('BEGIN');const id=randomUUID();
+   await c.query("INSERT INTO sleepy_payment_orders(id,user_id,server_id,amount_satang,status,paid_at,server_name,user_name,payment_method,installation_state,purchase_number) VALUES($1,'manual',$2,$3,'paid',now(),$4,'manual grant','manual','waiting',nextval('sleepy_purchase_sequence'))",[id,server,amount,note]);
+   await c.query("INSERT INTO sleepy_install_entitlements(user_id,server_id,order_id,installed_at) VALUES('manual',$1,$2,NULL) ON CONFLICT(user_id,server_id) DO UPDATE SET order_id=EXCLUDED.order_id",[server,id]);
+   await c.query('COMMIT');return id;
+  }catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}
+ },
  async failed(id,key,error){
   // Persist ambiguous results; never automatically redeem or grant again after a timeout.
   const c=await db.connect();try{await c.query('BEGIN');await c.query('UPDATE sleepy_payment_attempts SET status=$2,error_code=$3 WHERE proof_key=$1',[key,error.uncertain?'review':'rejected',error.code||'payment_review']);await c.query('UPDATE sleepy_payment_orders SET status=$2 WHERE id=$1',[id,error.uncertain?'review':'pending']);await c.query('COMMIT');}catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}
@@ -67,18 +97,18 @@ export function paymentStore(db=database()){
 }
 export async function checkoutPayment(user,server,serverName=null,userName=null){
  if(!paymentsEnabled())return {required:false};const config=paymentConfig();const store=paymentStore();
- if(await store.entitled(user,server))return {required:true,paid:true};
+ if(await store.entitled(server))return {required:true,paid:true};
  const o=await store.checkout(user,server,config.amount,serverName,userName);
  if(o.status==='paid')return {required:true,paid:true};
  return {required:true,paid:false,status:o.status,orderId:o.id,amountSatang:o.amount_satang,expiresAt:o.expires_at,methods:{promptpay:config.promptpay,truemoney:config.truemoney},receiver:config.receiver,truemoneyPhone:config.truemoney?config.phone:null,promptpayId:config.promptpay?config.target:null,qr:config.promptpay?await QRCode.toDataURL(generatePayload(config.target,{amount:o.amount_satang/100}),{width:320,margin:2}):null};
 }
-export async function payOrder(user,body,store=paymentStore(),config=paymentConfig(),providers={checkSlip}){
+export async function payOrder(user,body,store=paymentStore(),config=paymentConfig(),providers={checkSlip},notify=alert){
  if(!/^[0-9a-f-]{36}$/.test(body.orderId||''))throw new PaymentError('payment_order');
  if(!config[body.method])throw new PaymentError('payment_method');
  const p=proof(body);const o=await store.begin(body.orderId,user,p.key,body.method);if(!o)return {paid:true};
  try{const result=await providers.checkSlip(o,p.value,config);await store.finish(o,p.key,result);return {paid:true};}
- catch(e){const error=e instanceof PaymentError?e:new PaymentError('payment_review',true);await store.failed(o.id,p.key,error);throw error;}
+ catch(e){const error=e instanceof PaymentError?e:new PaymentError('payment_review',true);await store.failed(o.id,p.key,error);if(error.uncertain)await notify('ออเดอร์รอตรวจสอบด้วยมือ (review)',{order:o.id,server:o.server_name||o.server_id,amount:(o.amount_satang/100).toFixed(2)+' บาท',code:error.code});throw error;}
 }
-export async function requirePayment(user,server){if(paymentsEnabled()){paymentConfig();if(!await paymentStore().entitled(user,server))throw new PaymentError('payment_required');}}
+export async function requirePayment(server){if(paymentsEnabled()){paymentConfig();if(!await paymentStore().entitled(server))throw new PaymentError('payment_required');}}
 
-export async function consumeInstallation(user,server){if(paymentsEnabled())await paymentStore().installed(user,server);}
+export async function consumeInstallation(server){if(paymentsEnabled())await paymentStore().installed(server);}

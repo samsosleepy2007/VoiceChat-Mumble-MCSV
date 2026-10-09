@@ -32,19 +32,21 @@ const store=paymentStore(adapter);const o=await store.checkout('user-a','server-
 let verified=0;const providers={checkSlip:async(o,value,c)=>{verified++;assert.equal(value.mime,'image/png');assert.equal(c.branch,config.branch);return {reference:'slip:wallet:unique',amount:10000};}};
 const body={orderId:o.id,method:'truemoney',image:imageValue};
 await assert.rejects(payOrder('user-b',body,store,config,providers),e=>e.code==='payment_order');assert.equal(verified,0);
-assert.equal((await payOrder('user-a',body,store,config,providers)).paid,true);assert(await store.entitled('user-a','server-a'));assert(!await store.entitled('user-a','server-b'));assert(!await store.entitled('user-b','server-a'));
+assert.equal((await payOrder('user-a',body,store,config,providers)).paid,true);assert(await store.entitled('server-a'));assert(!await store.entitled('server-b'));
 assert.equal((await payOrder('user-a',body,store,config,providers)).paid,true);assert.equal(verified,1);assert.equal((await store.checkout('user-a','server-a',10000)).status,'paid');
 const other=await store.checkout('user-b','server-b',10000);await assert.rejects(payOrder('user-b',{...body,orderId:other.id,method:'promptpay'},store,config,providers),e=>e.code==='payment_duplicate');assert.equal(verified,1);
 const uncertain=await store.checkout('user-a','server-c',10000);const uncertainBody={...body,orderId:uncertain.id,image:differentImage(1)};
 await assert.rejects(payOrder('user-a',uncertainBody,store,config,{checkSlip:async()=>{throw new PaymentError('payment_review',true);}}),e=>e.uncertain);
-assert.equal((await store.order(uncertain.id,'user-a')).status,'review');assert(!await store.entitled('user-a','server-c'));assert.equal((await store.checkout('user-a','server-c',10000)).id,uncertain.id);
+assert.equal((await store.order(uncertain.id,'user-a')).status,'review');assert(!await store.entitled('server-c'));assert.equal((await store.checkout('user-a','server-c',10000)).id,uncertain.id);
 await assert.rejects(payOrder('user-a',uncertainBody,store,config,providers),e=>e.code==='payment_review');
 const expired=await store.checkout('user-c','server-d',10000);await db.query("UPDATE sleepy_payment_orders SET expires_at=now()-interval '1 minute' WHERE id=$1",[expired.id]);await assert.rejects(store.begin(expired.id,'user-c','unused','truemoney'),e=>e.code==='payment_expired');
 const newer=await store.checkout('user-c','server-d',10000);assert.notEqual(newer.id,expired.id);
-const sameRef=await store.checkout('user-d','server-e',10000);await assert.rejects(payOrder('user-d',{...body,orderId:sameRef.id,image:differentImage(2)},store,config,providers),e=>e.uncertain);assert(!await store.entitled('user-d','server-e'));
-process.env.PAYMENTS_ENABLED='true';await assert.rejects(requirePayment('user','server'),e=>e.code==='payment_unavailable');delete process.env.PAYMENTS_ENABLED;
+const sameRef=await store.checkout('user-d','server-e',10000);await assert.rejects(payOrder('user-d',{...body,orderId:sameRef.id,image:differentImage(2)},store,config,providers),e=>e.uncertain);assert(!await store.entitled('server-e'));
+process.env.PAYMENTS_ENABLED='true';await assert.rejects(requirePayment('server'),e=>e.code==='payment_unavailable');delete process.env.PAYMENTS_ENABLED;
 // One payment per server: installing keeps the entitlement, so a reinstall needs no new order.
-await store.installed('user-a','server-a');assert(await store.entitled('user-a','server-a'));assert.equal((await store.checkout('user-a','server-a',10000)).status,'paid');assert(!await store.entitled('user-b','server-a'));
+await store.installed('server-a');assert(await store.entitled('server-a'));assert.equal((await store.checkout('user-a','server-a',10000)).status,'paid');
+// A payment belongs to the server: another Discord account managing it is not charged again.
+assert.equal((await store.checkout('user-b','server-a',10000)).status,'paid');
 await db.close();console.log('PASS payments: SlipOK log/amount/account errors, old slips, TrueMoney slip upload, shared SlipOK validation and cross-channel replay prevention, SQL duplicate protection, ownership, retries, expiry, ambiguous recovery and fail-closed configuration');
 
 const legacy=new PGlite();const schema=await readFile(new URL('../web/join/lib/payment-schema.sql',import.meta.url),'utf8');await legacy.exec(schema.replace(',installed_at timestamptz',''));

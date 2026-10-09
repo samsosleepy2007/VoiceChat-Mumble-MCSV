@@ -31,7 +31,7 @@ ATTENUATION_LEVELS: dict[int, str] = {
 
 class MumbleHost(Plugin):
     prefix = "MumbleHost"
-    version = "0.6.1"
+    version = "0.6.2"
     api_version = "0.11"
     description = "Unified MCSV Mumble server + Item Mic proximity + SleepyPhone call routing"
     authors = ["SamSoSleepy"]
@@ -78,6 +78,7 @@ class MumbleHost(Plugin):
         self._mumble_users = 99
         self._license: Any = None
         self._last_host_running = False
+        self._tick_error_logged = 0.0
 
     def on_enable(self) -> None:
         # Endstone may enable the same instance after disable. A shutdown
@@ -140,7 +141,7 @@ class MumbleHost(Plugin):
             )
         if self._host is not None and self._license is not None:
             self.logger.info(
-                f"  {ok} Voice      {white}มัมเบิลกำลังเปิดที่พอร์ต {self._mumble_port}{reset}"
+                f"  {ok} Voice      {white}กำลังเปิดเซิร์ฟเวอร์เสียงที่พอร์ต {self._mumble_port}{reset}"
             )
         self.logger.info(
             f"  {dot} ระยะเสียง  {white}{self._default_range} ม.{reset} "
@@ -452,6 +453,9 @@ class MumbleHost(Plugin):
         if host is None:
             player.send_error_message("Mumble host is unavailable.")
             return
+        if self._license is None:
+            player.send_error_message("MumbleHost: ไม่มีใบอนุญาตที่ถูกต้อง เปิดเสียงไม่ได้ — ติดตั้งใหม่จากเว็บ SleepyMumla")
+            return
         self._last_host_running = False
         threading.Thread(
             target=host.restart,
@@ -461,7 +465,22 @@ class MumbleHost(Plugin):
         player.send_message("MumbleHost: restarting local Mumble server.")
         self._show_main_menu(player)
 
+    def _operator_notice(self) -> str | None:
+        if self._license is None:
+            return (
+                f"{ColorFormat.RED}[SleepyMumla] ใบอนุญาตไม่ถูกต้อง ระบบเสียงถูกปิด{ColorFormat.RESET} "
+                "— ติดตั้งใหม่จากเว็บ SleepyMumla (ไม่เสียเงินซ้ำถ้าเคยจ่ายแล้ว)"
+            )
+        status = self._host_state_label()
+        if status.startswith(("error", "retrying")):
+            return f"{ColorFormat.YELLOW}[SleepyMumla] เซิร์ฟเวอร์เสียงมีปัญหา: {status}{ColorFormat.RESET}"
+        return None
+
     def handle_player_join(self, player: Player) -> None:
+        if self._is_operator(player):
+            notice = self._operator_notice()
+            if notice:
+                player.send_message(notice)
         self._publish_addon_range_tags(player)
         self._publish_addon_attenuation_tags(player)
         state = self._snapshot_if_valid(player)
@@ -483,6 +502,18 @@ class MumbleHost(Plugin):
         })
 
     def _tracking_tick(self) -> None:
+        try:
+            self._tracking_tick_body()
+        except Exception as exc:
+            now = time.monotonic()
+            if now - self._tick_error_logged >= 60.0:
+                self._tick_error_logged = now
+                self.logger.error(
+                    f"MumbleHost tracking tick failed (shown at most once a minute): "
+                    f"{type(exc).__name__}: {exc}"
+                )
+
+    def _tracking_tick_body(self) -> None:
         tick_started = time.perf_counter()
         current_keys: set[str] = set()
 
