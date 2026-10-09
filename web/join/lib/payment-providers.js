@@ -19,10 +19,14 @@ export function proof(body){
  if(body.method==='promptpay'||body.method==='truemoney'){const image=slipImage(body.image);return {value:image,key:'image:'+createHash('sha256').update(image.bytes).digest('hex')};}
  throw new PaymentError('payment_method');
 }
+const CONNECT_FAILURES=new Set(['ECONNREFUSED','ENOTFOUND','EAI_AGAIN','UND_ERR_CONNECT_TIMEOUT','EHOSTUNREACH','ENETUNREACH']);
 export async function checkSlip(order,image,config,fetcher=fetch){
  const form=new FormData();form.append('files',new Blob([image.bytes],{type:image.mime}),'slip.'+(image.mime==='image/png'?'png':image.mime==='image/webp'?'webp':'jpg'));form.append('log','true');form.append('amount',(order.amount_satang/100).toFixed(2));
  let response,result;
- try{response=await fetcher('https://api.slipok.com/api/line/apikey/'+config.branch,{method:'POST',redirect:'error',headers:{'x-authorization':config.key},body:form,signal:AbortSignal.timeout(25000)});result=await response.json();}catch{throw new PaymentError('payment_review',true);}
+ try{response=await fetcher('https://api.slipok.com/api/line/apikey/'+config.branch,{method:'POST',redirect:'error',headers:{'x-authorization':config.key},body:form,signal:AbortSignal.timeout(25000)});}catch(error){
+  // Only a failure to connect proves SlipOK never saw the slip; anything later may have been logged.
+  if(!response&&CONNECT_FAILURES.has(error?.cause?.code||error?.code))throw new PaymentError('payment_retry');throw new PaymentError('payment_review',true);}
+ try{result=await response.json();}catch{throw new PaymentError('payment_review',true);}
  if(!response.ok||result.success!==true){const code=Number(result.code);const errors={1010:'slip_delay',1012:'payment_duplicate',1013:'payment_amount',1014:'payment_receiver',1006:'slip_format',1007:'slip_format',1008:'slip_invalid',1009:'slip_invalid'};throw new PaymentError(errors[code]||'payment_review',!errors[code]);}
  const d=result.data;let amount;try{amount=satang(d?.amount);}catch{throw new PaymentError('payment_review',true);}
  const timestamp=Date.parse(d?.transTimestamp);const created=new Date(order.created_at).getTime();
