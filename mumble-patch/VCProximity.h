@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QtCore/QString>
+#include <QtCore/QStringList>
 #include <QtCore/QtGlobal>
 
 namespace VCProximity {
@@ -37,5 +38,10 @@ float attenuationFactor(const QString &speakerName, const QString &listenerName)
 // Returns true when Mumble should retain the receiver in the normal-speech
 // routing path.
 bool shouldRoute(const QString &speakerName, const QString &listenerName);
+
+// Talking detection: the voice thread records each accepted audio packet; the
+// state feed reads who sent audio within the last holdMs milliseconds.
+void noteAudio(const QString &speakerName);
+QStringList activeTalkers(qint64 holdMs);
 
 } // namespace VCProximity

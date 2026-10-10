@@ -20,6 +20,8 @@ from .report import report_unlicensed
 from .local_state import LocalStateSink
 from .model import PlayerState
 
+TALKING_TAG = "vcmumble.talking"
+
 
 ATTENUATION_LEVELS: dict[int, str] = {
     0: "ปิด",
@@ -542,6 +544,7 @@ class MumbleHost(Plugin):
                     )
                 continue
 
+            self._sync_talking_tag(player, state.voice_enabled)
             previous = self._states.get(key)
             if previous is None or state.voice_enabled != previous.voice_enabled:
                 self.logger.info(
@@ -874,6 +877,19 @@ class MumbleHost(Plugin):
                 player.add_scoreboard_tag(replacement)
         except Exception:
             pass
+
+    def _sync_talking_tag(self, player: Player, voice_enabled: bool) -> None:
+        # The addon swaps the name/ActionBar glyph while this tag is present.
+        sink = self._state_sink
+        talking = voice_enabled and sink is not None and str(player.name) in sink.talkers
+        try:
+            has_tag = TALKING_TAG in player.scoreboard_tags
+        except Exception:
+            return
+        if talking and not has_tag:
+            self._add_player_tag(player, TALKING_TAG)
+        elif not talking and has_tag:
+            self._remove_player_tag(player, TALKING_TAG)
 
     @staticmethod
     def _add_player_tag(player: Player, tag: str) -> None:

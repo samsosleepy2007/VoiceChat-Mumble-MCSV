@@ -43,21 +43,28 @@ const PROP_VOICE_RANGE = "vcmumble:voice_range";
 const PROP_ACTIONBAR = "vcmumble:show_actionbar";
 const PROP_INTRO_SEEN = "vcmumble:mic_status_intro";
 // Mic-status glyphs live in addon/RP/font/glyph_E9.png (auto-loaded for U+E9xx).
-// TALKING is reserved for when a live 'is-speaking' signal exists; mic-on uses MIC_ON for now.
+// TALKING shows while MumbleHost tags the player as sending voice (vcmumble.talking).
+const TALKING_TAG = "vcmumble.talking";
 const GLYPH_TALKING = "\uE900";
 const GLYPH_MIC_ON = "\uE902";
 const GLYPH_MIC_OFF = "\uE910";
 const ACTIONBAR_REFRESH_TICKS = 20;
-function micGlyph(hasMic, effective) { return hasMic ? (effective ? GLYPH_MIC_ON : GLYPH_MIC_OFF) : null; }
+function micGlyph(player, hasMic, effective) {
+  if (!hasMic) return null;
+  if (!effective) return GLYPH_MIC_OFF;
+  let talking = false;
+  try { talking = player.hasTag(TALKING_TAG); } catch {}
+  return talking ? GLYPH_TALKING : GLYPH_MIC_ON;
+}
 function applyNameGlyph(player, state, hasMic, effective) {
-  const glyph = micGlyph(hasMic, effective);
+  const glyph = micGlyph(player, hasMic, effective);
   if (state.nameGlyph === glyph) return;
   state.nameGlyph = glyph;
   try { player.nameTag = glyph ? player.name + " " + glyph : player.name; } catch {}
 }
 function applyActionBar(player, state, hasMic, effective) {
   if (player.getDynamicProperty(PROP_ACTIONBAR) !== true || !hasMic) { state.actionbarGlyph = undefined; return; }
-  const glyph = micGlyph(hasMic, effective) || "";
+  const glyph = micGlyph(player, hasMic, effective) || "";
   if (state.actionbarGlyph === glyph && system.currentTick - (state.lastActionbarTick ?? -100) < ACTIONBAR_REFRESH_TICKS) return;
   state.actionbarGlyph = glyph; state.lastActionbarTick = system.currentTick;
   try { player.onScreenDisplay.setActionBar(glyph); } catch {}
@@ -3783,7 +3790,7 @@ staggerPlayerWork("inventory_maintenance", 100, () => world.getAllPlayers(), pla
 });
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.15.45 — mic-status glyphs, staggered maintenance and bounded bank notifications"
+  "[VCMumbleItem/BP] Loaded v2.15.46 — talking glyph, mic-status glyphs, staggered maintenance and bounded bank notifications"
 );
 
 // Verify real item registration and per-item metadata without giving test items.

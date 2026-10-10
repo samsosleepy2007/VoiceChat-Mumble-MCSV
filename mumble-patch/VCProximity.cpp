@@ -363,4 +363,31 @@ bool shouldRoute(const QString &speakerName, const QString &listenerName) {
     return attenuationFactor(speakerName, listenerName) > 0.0F;
 }
 
+namespace {
+QReadWriteLock g_talkLock;
+QHash<QString, qint64> g_lastAudioMs;
+} // namespace
+
+void noteAudio(const QString &speakerName) {
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    QWriteLocker locker(&g_talkLock);
+    g_lastAudioMs.insert(speakerName, now);
+}
+
+QStringList activeTalkers(qint64 holdMs) {
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    QStringList names;
+    QWriteLocker locker(&g_talkLock);
+    for (auto it = g_lastAudioMs.begin(); it != g_lastAudioMs.end();) {
+        if (now - it.value() <= holdMs) {
+            names.append(it.key());
+            ++it;
+        } else {
+            it = g_lastAudioMs.erase(it);
+        }
+    }
+    names.sort();
+    return names;
+}
+
 } // namespace VCProximity
