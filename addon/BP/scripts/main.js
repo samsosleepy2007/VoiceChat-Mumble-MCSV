@@ -40,6 +40,28 @@ const MODE_TOGGLE = "toggle";
 const PROP_MODE = "vcmumble:mode";
 const PROP_LATCH = "vcmumble:toggle_latched";
 const PROP_VOICE_RANGE = "vcmumble:voice_range";
+const PROP_ACTIONBAR = "vcmumble:show_actionbar";
+const PROP_INTRO_SEEN = "vcmumble:mic_status_intro";
+// Mic-status glyphs live in addon/RP/font/glyph_E9.png (auto-loaded for U+E9xx).
+// TALKING is reserved for when a live 'is-speaking' signal exists; mic-on uses MIC_ON for now.
+const GLYPH_TALKING = "\uE900";
+const GLYPH_MIC_ON = "\uE902";
+const GLYPH_MIC_OFF = "\uE910";
+const ACTIONBAR_REFRESH_TICKS = 20;
+function micGlyph(hasMic, effective) { return hasMic ? (effective ? GLYPH_MIC_ON : GLYPH_MIC_OFF) : null; }
+function applyNameGlyph(player, state, hasMic, effective) {
+  const glyph = micGlyph(hasMic, effective);
+  if (state.nameGlyph === glyph) return;
+  state.nameGlyph = glyph;
+  try { player.nameTag = glyph ? player.name + " " + glyph : player.name; } catch {}
+}
+function applyActionBar(player, state, hasMic, effective) {
+  if (player.getDynamicProperty(PROP_ACTIONBAR) !== true || !hasMic) { state.actionbarGlyph = undefined; return; }
+  const glyph = micGlyph(hasMic, effective) || "";
+  if (state.actionbarGlyph === glyph && system.currentTick - (state.lastActionbarTick ?? -100) < ACTIONBAR_REFRESH_TICKS) return;
+  state.actionbarGlyph = glyph; state.lastActionbarTick = system.currentTick;
+  try { player.onScreenDisplay.setActionBar(glyph); } catch {}
+}
 const LEGACY_PROP_MODE = "voicecraft:mode";
 const LEGACY_PROP_LATCH = "voicecraft:toggle_latched";
 const LEGACY_PROP_VOICE_RANGE = "voicecraft:voice_range";
@@ -407,6 +429,8 @@ function evaluate(player) {
       state.publishedEffective = true;
       state.lastPublishedTick = system.currentTick;
     }
+    applyNameGlyph(player, state, true, true);
+    applyActionBar(player, state, true, true);
     state.lastMainMic = mainMic;
     return;
   }
@@ -456,6 +480,8 @@ function evaluate(player) {
     state.publishedEffective = effective;
     state.lastPublishedTick = system.currentTick;
   }
+  applyNameGlyph(player, state, hasMic, effective);
+  applyActionBar(player, state, hasMic, effective);
   state.lastMainMic = mainMic;
 }
 
@@ -3225,6 +3251,27 @@ function notifyMicUiCooldown(player) {
   player.sendMessage("[ SleepyMic ] ติดคูลดาวน์การใช้ โปรดรอสักครู่และลองอีกครั้ง");
 }
 
+async function maybeShowMicStatusIntro(player) {
+  try {
+    if (player.getDynamicProperty(PROP_INTRO_SEEN) === true) return;
+    if (openSettingsPlayers.has(player.id) || pendingMicUiOpens.has(player.id)) return;
+    const form = new ActionFormData()
+      .title("SleepyMic — สถานะไมค์")
+      .body(
+        "แสดงสถานะไมค์ของคุณบนแถบ ActionBar ไหม?\n\n" +
+        "กำลังเปิดไมค์: " + GLYPH_MIC_ON + "    ปิดไมค์: " + GLYPH_MIC_OFF + "\n\n" +
+        "§7ชื่อของคุณจะมีสัญลักษณ์นี้ให้ผู้เล่นอื่นเห็นเสมอ ส่วน ActionBar เป็นของคุณคนเดียว\n" +
+        "แก้ไขได้ภายหลังในตั้งค่าของไอเทมไมค์§r"
+      )
+      .button("แสดงใน ActionBar " + GLYPH_MIC_ON)
+      .button("ไม่แสดง");
+    const res = await form.show(player);
+    if (res.canceled && res.cancelationReason === "UserBusy") return; // try again next spawn
+    player.setDynamicProperty(PROP_INTRO_SEEN, true);
+    if (!res.canceled) player.setDynamicProperty(PROP_ACTIONBAR, res.selection === 0);
+  } catch (e) { console.warn(`[VCMumbleItem/BP] mic intro failed player=${player.name}: ${e}`); }
+}
+
 async function showSettings(player) {
   if (player.hasTag(PHONE_VOICE_TAG)) {
     player.sendMessage("[ SleepyMic ] ระหว่างโทร ไมค์เปิดและใช้ระยะ 4 บล็อก เมื่อจบสายจะกลับไปใช้ค่าเดิม");
@@ -3251,6 +3298,10 @@ async function showSettings(player) {
       `\nสถานะไมค์: ${initial.effective ? "§aON" : "§cOFF"}§r\n`
     );
     const modeText = new ObservableString(`โหมด: §e${modeUiLabel(initial.mode)}§r\n`);
+    const actionbarOn = () => player.getDynamicProperty(PROP_ACTIONBAR) === true;
+    const actionbarText = new ObservableString(
+      `แสดงใน ActionBar: ${actionbarOn() ? "§aเปิด" : "§cปิด"}§r\n`
+    );
     const rangeText = new ObservableString(
       `ระยะเสียงปัจจุบัน: §b${initialRange} บล็อก§r\n`
     );
@@ -3476,6 +3527,17 @@ async function showSettings(player) {
       )
       .spacer({ visible: settingsPageVisible })
       .divider({ visible: settingsPageVisible })
+      .header("สถานะไมค์ " + GLYPH_MIC_ON, { visible: settingsPageVisible })
+      .label(actionbarText, { visible: settingsPageVisible })
+      .label("แสดงสัญลักษณ์ไมค์ของคุณบนแถบ ActionBar\n(ชื่อเหนือหัวจะมีสัญลักษณ์ให้คนอื่นเห็นเสมอ)\n", { visible: settingsPageVisible })
+      .button("สลับ แสดง/ไม่แสดง " + GLYPH_MIC_ON, () => {
+        const next = !actionbarOn();
+        player.setDynamicProperty(PROP_ACTIONBAR, next);
+        if (!next) { try { player.onScreenDisplay.setActionBar(""); } catch {} const st = states.get(player.id); if (st) st.actionbarGlyph = undefined; }
+        actionbarText.setData(`แสดงใน ActionBar: ${next ? "§aเปิด" : "§cปิด"}§r\n`);
+      }, { visible: settingsPageVisible })
+      .spacer({ visible: settingsPageVisible })
+      .divider({ visible: settingsPageVisible })
       .header("Reset", { visible: settingsPageVisible })
       .label("คืน Mic Mode เป็น Hold-to-Talk\nVoice Range = 30 บล็อก\n", {
         visible: settingsPageVisible,
@@ -3645,6 +3707,7 @@ world.afterEvents.playerSpawn.subscribe((ev) => {
     console.warn(
       `[VCMumbleItem/BP] READY player=${player.name} mode=${getMode(player)} range=${currentVoiceRange(player)} micTag=${stateFor(player).effective ? "on" : "off"}`
     );
+    if (ev.initialSpawn === true) system.runTimeout(() => { maybeShowMicStatusIntro(player); }, 40);
   });
 });
 
@@ -3720,7 +3783,7 @@ staggerPlayerWork("inventory_maintenance", 100, () => world.getAllPlayers(), pla
 });
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.15.44 — staggered maintenance and bounded bank notifications"
+  "[VCMumbleItem/BP] Loaded v2.15.45 — mic-status glyphs, staggered maintenance and bounded bank notifications"
 );
 
 // Verify real item registration and per-item metadata without giving test items.

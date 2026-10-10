@@ -9,7 +9,7 @@ const ctx = vm.createContext({
   getMode: () => 'hold', getMainId: () => held,
   isMicId: id => ['on', 'off'].includes(id),
   stateFor: () => ({ mode: 'hold', micKnown: false, toggleLatched: false, lastMainMic: false }),
-  setLatch() {}, replaceMicStatus() {}, publishMicState() {},
+  setLatch() {}, replaceMicStatus() {}, publishMicState() {}, applyNameGlyph() {}, applyActionBar() {},
   system: { currentTick: 1 }, console: { warn() {} },
 });
 vm.runInContext(source.slice(source.indexOf('function evaluate(player)'), source.indexOf('function isPhoneId(')), ctx);

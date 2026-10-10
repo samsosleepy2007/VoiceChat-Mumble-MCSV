@@ -25,16 +25,16 @@ const pp=await page({...base,payment:checkout});Object.defineProperty(pp.el('pay
 console.log('PASS payment UI: Endstone check → payment → port, method switching, no premature install, no API-key forwarding, paid/free paths, unsupported/review states');
 
 const weave={version:'0.5.1',name:'endstone_endweave-0.5.1-cp312-abi3-manylinux_2_28_x86_64.whl',source:'github',project:'https://github.com/EndstoneMC/endweave'};
-const newest={plugin:'0.6.1',addon:'2.15.44',endweave:weave};
-const latest=await page({...base,installation:{present:true,status:'current',parts:{plugin:'current',addon:'current',endweave:'current',license:'valid'},pluginVersions:['0.6.1'],addonVersions:{behavior:'2.15.44',resource:'2.15.44'},endweaveVersions:['0.5.1'],latest:newest},payment:{required:false,reason:'installed'}});
+const newest={plugin:'0.6.1',addon:'2.15.45',endweave:weave};
+const latest=await page({...base,installation:{present:true,status:'current',parts:{plugin:'current',addon:'current',endweave:'current',license:'valid'},pluginVersions:['0.6.1'],addonVersions:{behavior:'2.15.45',resource:'2.15.45'},endweaveVersions:['0.5.1'],latest:newest},payment:{required:false,reason:'installed'}});
 // An installed server first shows its status card; nothing opens on its own.
 assert(!latest.el('install-status').hidden);assert.equal(latest.el('install-status-title').textContent,'เซิร์ฟเวอร์เป็นเวอร์ชันล่าสุดแล้ว');assert.equal(latest.el('install-status-action').textContent,'ติดตั้งซ้ำ');
 const rows=[...latest.el('install-status-list').children].map(li=>li.textContent);assert.equal(rows.length,4);assert.match(rows[0],/ถูกต้อง/);assert.match(rows[3],/Endweave✔ 0\.5\.1 ล่าสุด/);assert.equal(latest.el('endweave-link').href,'https://github.com/EndstoneMC/endweave');
 assert(!latest.el('reinstall-dialog').open);assert(!latest.el('install-dialog').open);assert(latest.el('payment-page').hidden);
 latest.el('install-status-action').click();assert(latest.el('reinstall-dialog').open);assert.match(latest.el('installed-version').textContent,/Endweave 0\.5\.1/);
 latest.el('keep-installed').click();assert(!latest.el('reinstall-dialog').open);assert(!latest.el('install-dialog').open);assert.equal(latest.requests.length,1);
-latest.el('install-status-action').click();latest.el('confirm-reinstall').click();assert(latest.el('install-dialog').open);assert.match(latest.el('install-what').textContent,/MumbleHost 0\.6\.1 \+ Item Mic 2\.15\.44 \+ Endweave 0\.5\.1/);latest.dom.window.close();
-const update=await page({...base,installation:{present:true,status:'update',parts:{plugin:'update',addon:'current',endweave:'absent',license:'missing'},pluginVersions:['0.6.0'],addonVersions:{behavior:'2.15.44'},endweaveVersions:[],latest:newest},payment:{required:false,reason:'installed'}});
+latest.el('install-status-action').click();latest.el('confirm-reinstall').click();assert(latest.el('install-dialog').open);assert.match(latest.el('install-what').textContent,/MumbleHost 0\.6\.1 \+ Item Mic 2\.15\.45 \+ Endweave 0\.5\.1/);latest.dom.window.close();
+const update=await page({...base,installation:{present:true,status:'update',parts:{plugin:'update',addon:'current',endweave:'absent',license:'missing'},pluginVersions:['0.6.0'],addonVersions:{behavior:'2.15.45'},endweaveVersions:[],latest:newest},payment:{required:false,reason:'installed'}});
 assert.equal(update.el('install-status-title').textContent,'มีรุ่นใหม่ · แนะนำให้อัปเดต');assert.equal(update.el('install-status-action').textContent,'อัปเดตเป็นรุ่นล่าสุด');
 const updateRows=[...update.el('install-status-list').children].map(li=>li.className+':'+li.textContent);assert.match(updateRows[0],/^warn:.*ยังไม่มี/);assert.match(updateRows[1],/^warn:MumbleHost0\.6\.0 → 0\.6\.1/);assert.match(updateRows[3],/^warn:Endweaveยังไม่มี → 0\.5\.1/);
 assert(!update.el('install-dialog').open);update.el('install-status-action').click();assert(update.el('install-dialog').open);assert(!update.el('reinstall-dialog').open);assert(update.el('payment-page').hidden);update.dom.window.close();
