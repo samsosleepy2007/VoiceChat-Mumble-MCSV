@@ -43,24 +43,41 @@ const PROP_VOICE_RANGE = "vcmumble:voice_range";
 const PROP_ACTIONBAR = "vcmumble:show_actionbar";
 const PROP_INTRO_SEEN = "vcmumble:mic_status_intro";
 // Mic-status glyphs live in addon/RP/font/glyph_E9.png (auto-loaded for U+E9xx).
-// TALKING shows while MumbleHost tags the player as sending voice (vcmumble.talking).
-const TALKING_TAG = "vcmumble.talking";
-// MumbleHost echoes the mic state it reads from Endstone; warn when it disagrees for 2 s.
-const ENDSTONE_SEEN_ON_TAG = "vcmumble.ep.on";
-const ENDSTONE_SEEN_OFF_TAG = "vcmumble.ep.off";
+// Frequently-changing bridge state lives in scoreboard scores. Churning tags left
+// players with duplicate, unremovable mic tags (both on and off) after mic toggles,
+// which silenced them in both directions until the tags were cleaned up.
+const MIC_SCORE = "vcmumble_mic";          // addon -> MumbleHost: 1 mic on, 0 off
+const TALK_SCORE = "vcmumble_talk";        // MumbleHost -> addon: 1 while sending voice
+const ENDSTONE_SEEN_SCORE = "vcmumble_ep"; // MumbleHost echo of the mic state it read
+const LEGACY_BRIDGE_TAGS = ["vcmumble.mic.on", "vcmumble.mic.off", "vcmumble.talking", "vcmumble.ep.on", "vcmumble.ep.off"];
+function bridgeObjective(id) {
+  try { return world.scoreboard.getObjective(id) ?? world.scoreboard.addObjective(id, id); } catch { return undefined; }
+}
+function readBridgeScore(id, player) {
+  try { return world.scoreboard.getObjective(id)?.getScore(player); } catch { return undefined; }
+}
+function clearLegacyBridgeTags(player) {
+  for (const tag of LEGACY_BRIDGE_TAGS) {
+    try {
+      for (let i = 0; i < 8 && player.hasTag(tag); i++) player.removeTag(tag);
+      if (player.hasTag(tag)) {
+        try { player.runCommand(`tag @s remove ${tag}`); } catch {}
+        if (player.hasTag(tag)) console.warn(`[VCMumbleItem/BP] LEGACY_TAG_STUCK player=${player.name} tag=${tag}`);
+      }
+    } catch {}
+  }
+}
+// Warn when MumbleHost's view of the mic disagrees with the addon for 2 s.
 function checkEndstoneAgreement(player, state, effective) {
-  let seenOn = false, seenOff = false;
-  try { seenOn = player.hasTag(ENDSTONE_SEEN_ON_TAG); seenOff = player.hasTag(ENDSTONE_SEEN_OFF_TAG); } catch { return; }
-  if (!seenOn && !seenOff) return;
-  if (effective ? seenOn : seenOff) { state.micMismatchSince = undefined; return; }
+  const seen = readBridgeScore(ENDSTONE_SEEN_SCORE, player);
+  if (seen === undefined) return;
+  if ((seen === 1) === effective) { state.micMismatchSince = undefined; return; }
   if (state.micMismatchSince === undefined) { state.micMismatchSince = system.currentTick; return; }
   if (system.currentTick - state.micMismatchSince < 40) return;
   if (system.currentTick - (state.lastMismatchWarnTick ?? -1000) < 200) return;
   state.lastMismatchWarnTick = system.currentTick;
-  let tags = [];
-  try { tags = player.getTags().filter(tag => tag.startsWith("vcmumble.mic.") || tag.startsWith("vcmumble.ep.") || tag === "vcmumble.call.mic"); } catch {}
   console.warn(
-    `[VCMumbleItem/BP] MIC_MISMATCH player=${player.name} addon=${effective ? "ON" : "OFF"} endstone=${seenOn ? "ON" : "OFF"} for_ticks=${system.currentTick - state.micMismatchSince} tags=${tags.join(",") || "-"}`
+    `[VCMumbleItem/BP] MIC_MISMATCH player=${player.name} addon=${effective ? "ON" : "OFF"} endstone=${seen === 1 ? "ON" : "OFF"} for_ticks=${system.currentTick - state.micMismatchSince} mic_score=${readBridgeScore(MIC_SCORE, player) ?? "-"}`
   );
 }
 const GLYPH_TALKING = "\uE900";
@@ -70,9 +87,7 @@ const ACTIONBAR_REFRESH_TICKS = 20;
 function micGlyph(player, hasMic, effective) {
   if (!hasMic) return null;
   if (!effective) return GLYPH_MIC_OFF;
-  let talking = false;
-  try { talking = player.hasTag(TALKING_TAG); } catch {}
-  return talking ? GLYPH_TALKING : GLYPH_MIC_ON;
+  return readBridgeScore(TALK_SCORE, player) === 1 ? GLYPH_TALKING : GLYPH_MIC_ON;
 }
 function applyNameGlyph(player, state, hasMic, effective) {
   // Compare with the live name tag so a failed write or a game-side reset is repaired.
@@ -99,8 +114,6 @@ const LEGACY_PROP_LATCH = "voicecraft:toggle_latched";
 const LEGACY_PROP_VOICE_RANGE = "voicecraft:voice_range";
 
 // Contract implemented by feature/minecraft-mic-addon-v1.
-const MIC_ON_TAG = "vcmumble.mic.on";
-const MIC_OFF_TAG = "vcmumble.mic.off";
 const RANGE_VALUE_PREFIX = "vcmumble.vr.value.";
 const RANGE_REQUEST_PREFIX = "vcmumble.vr.request.";
 const RANGE_MAX_PREFIX = "vcmumble.vr.max.";
@@ -389,33 +402,15 @@ function reassertMicFlags(player) {
 }
 
 function publishMicState(player, on) {
-  const wanted = on ? MIC_ON_TAG : MIC_OFF_TAG;
-  const unwanted = on ? MIC_OFF_TAG : MIC_ON_TAG;
-
+  const value = on ? 1 : 0;
   try {
-    // Keep the two bridge tags strictly mutually exclusive. Some worlds can
-    // retain an old OFF tag while the visual Mic item has already switched ON.
-    try {
-      if (player.hasTag(unwanted)) player.removeTag(unwanted);
-    } catch {}
-    try {
-      if (!player.hasTag(wanted)) player.addTag(wanted);
-    } catch {}
-
-    let tags = [];
-    try {
-      tags = player.getTags();
-    } catch {}
-    const correct = tags.includes(wanted) && !tags.includes(unwanted);
-
-    // Command fallback repairs tag state if Script API tag mutation did not
-    // become visible immediately to Endstone. Only runs when verification fails.
-    if (!correct) {
-      try { player.runCommand(`tag @s remove ${unwanted}`); } catch {}
-      try { player.runCommand(`tag @s add ${wanted}`); } catch {}
-    }
+    const objective = bridgeObjective(MIC_SCORE);
+    if (!objective) return;
+    let current;
+    try { current = objective.getScore(player); } catch {} // no scoreboard identity yet
+    if (current !== value) objective.setScore(player, value);
   } catch (e) {
-    console.warn(`[VCMumbleItem/BP] mic tag sync failed player=${player.name}: ${e}`);
+    console.warn(`[VCMumbleItem/BP] mic score sync failed player=${player.name}: ${e}`);
   }
 }
 function stateFor(player) {
@@ -3729,6 +3724,7 @@ world.afterEvents.playerSpawn.subscribe((ev) => {
     }
     if (ev.initialSpawn === true) {
       cleanupLegacyVoiceCraftBridgeTags(player);
+      clearLegacyBridgeTags(player);
       migrateDynamicProperties(player);
       states.delete(player.id);
     }
@@ -3765,7 +3761,7 @@ world.afterEvents.playerLeave.subscribe((ev) => {
 });
 
 // One-tick evaluation keeps Hold-to-Talk responsive and immediately mirrors
-// the state into vcmumble.mic.on/off for the Endstone plugin.
+// the state into the vcmumble_mic score for the Endstone plugin.
 system.runInterval(() => {
   for (const player of world.getAllPlayers()) {
     try {

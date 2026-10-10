@@ -12,6 +12,7 @@ from endstone import ColorFormat, Player
 from endstone.command import Command, CommandSender
 from endstone.form import ActionForm
 from endstone.plugin import Plugin
+from endstone.scoreboard import Criteria
 
 from .host import MumbleRuntimeHost
 from .license import load_license, LicenseError
@@ -20,9 +21,13 @@ from .report import report_unlicensed
 from .local_state import LocalStateSink
 from .model import PlayerState
 
-TALKING_TAG = "vcmumble.talking"
-ENDSTONE_SEEN_ON_TAG = "vcmumble.ep.on"
-ENDSTONE_SEEN_OFF_TAG = "vcmumble.ep.off"
+# Frequently-changing state shared with the addon lives in scoreboard scores.
+MIC_SCORE = "vcmumble_mic"
+TALK_SCORE = "vcmumble_talk"
+ENDSTONE_SEEN_SCORE = "vcmumble_ep"
+LEGACY_BRIDGE_TAGS = (
+    "vcmumble.mic.on", "vcmumble.mic.off", "vcmumble.talking", "vcmumble.ep.on", "vcmumble.ep.off",
+)
 
 
 ATTENUATION_LEVELS: dict[int, str] = {
@@ -488,6 +493,7 @@ class MumbleHost(Plugin):
             notice = self._operator_notice()
             if notice:
                 player.send_message(notice)
+        self._clear_legacy_bridge_tags(player)
         self._publish_addon_range_tags(player)
         self._publish_addon_attenuation_tags(player)
         state = self._snapshot_if_valid(player)
@@ -547,7 +553,7 @@ class MumbleHost(Plugin):
                     )
                 continue
 
-            self._sync_talking_tag(player, state.voice_enabled)
+            self._sync_talking_score(player, state.voice_enabled)
             previous = self._states.get(key)
             if previous is None or state.voice_enabled != previous.voice_enabled:
                 self.logger.info(
@@ -881,38 +887,67 @@ class MumbleHost(Plugin):
         except Exception:
             pass
 
-    def _sync_talking_tag(self, player: Player, voice_enabled: bool) -> None:
-        # The tag follows the voice server only; the addon combines it with its own
-        # mic state, so a stale Endstone view of the mic tags cannot hide the glyph.
+    def _sync_talking_score(self, player: Player, voice_enabled: bool) -> None:
+        # Follows the voice server only; the addon combines it with its own mic
+        # state. Scores, not tags: tag churn corrupted players' mic tags.
         sink = self._state_sink
         name = str(player.name)
         talking = sink is not None and name in sink.talkers
-        try:
-            tags = set(player.scoreboard_tags)
-        except Exception:
+        # Echo the mic state read here so the addon can report disagreements.
+        self._write_bridge_score(ENDSTONE_SEEN_SCORE, player, 1 if voice_enabled else 0)
+        if not self._write_bridge_score(TALK_SCORE, player, 1 if talking else 0):
             return
-        # Echo Endstone's view of the mic so the addon can report disagreements.
-        seen = ENDSTONE_SEEN_ON_TAG if voice_enabled else ENDSTONE_SEEN_OFF_TAG
-        stale = ENDSTONE_SEEN_OFF_TAG if voice_enabled else ENDSTONE_SEEN_ON_TAG
-        if stale in tags:
-            self._remove_player_tag(player, stale)
-        if seen not in tags:
-            self._add_player_tag(player, seen)
-        has_tag = TALKING_TAG in tags
-        if talking == has_tag:
-            return
-        if talking:
-            self._add_player_tag(player, TALKING_TAG)
-        else:
-            self._remove_player_tag(player, TALKING_TAG)
         now = time.monotonic()
         if talking and not voice_enabled or now - self._talk_log_at.get(name, 0.0) >= 2.0:
             self._talk_log_at[name] = now
-            mic_tags = sorted(tag for tag in tags if tag.startswith("vcmumble.mic.") or tag == "vcmumble.call.mic")
             self.logger.info(
                 f"TALK_STATE player={name} talking={'ON' if talking else 'OFF'} "
-                f"endstone_mic={'ON' if voice_enabled else 'OFF'} tags={','.join(mic_tags) or '-'}"
+                f"endstone_mic={'ON' if voice_enabled else 'OFF'} "
+                f"mic_score={self._read_bridge_score(MIC_SCORE, player)}"
             )
+
+    def _bridge_objective(self, name: str, create: bool = False) -> Any:
+        scoreboard = self.server.scoreboard
+        objective = scoreboard.get_objective(name)
+        if objective is None and create:
+            objective = scoreboard.add_objective(name, Criteria.Type.DUMMY)
+        return objective
+
+    def _read_bridge_score(self, name: str, player: Player) -> int | None:
+        try:
+            objective = self._bridge_objective(name)
+            if objective is None:
+                return None
+            score = objective.get_score(player)
+            return int(score.value) if score.is_score_set else None
+        except Exception:
+            return None
+
+    def _write_bridge_score(self, name: str, player: Player, value: int) -> bool:
+        """Set the score when it differs; returns True when it changed."""
+        try:
+            objective = self._bridge_objective(name, create=True)
+            if objective is None:
+                return False
+            score = objective.get_score(player)
+            if score.is_score_set and score.value == value:
+                return False
+            score.value = value
+            return True
+        except Exception:
+            return False
+
+    def _clear_legacy_bridge_tags(self, player: Player) -> None:
+        for tag in LEGACY_BRIDGE_TAGS:
+            for _ in range(8):
+                try:
+                    if tag not in player.scoreboard_tags:
+                        break
+                except Exception:
+                    return
+                self._remove_player_tag(player, tag)
+            else:
+                self.logger.warning(f"LEGACY_TAG_STUCK player={player.name} tag={tag}")
 
     @staticmethod
     def _add_player_tag(player: Player, tag: str) -> None:
@@ -935,18 +970,25 @@ class MumbleHost(Plugin):
         except Exception:
             return False
 
-    @staticmethod
-    def _voice_enabled_for(player: Player) -> bool:
+    def _voice_enabled_for(self, player: Player) -> bool:
         try:
             tags = set(player.scoreboard_tags)
             if "vcmumble.call.mic" in tags:
                 return True
-            # Fail closed: OFF wins even if stale ON is still present.
-            if "vcmumble.mic.off" in tags:
-                return False
-            return "vcmumble.mic.on" in tags
         except Exception:
             return False
+        # The addon publishes the mic state as a score; tags are only a fallback
+        # for an older addon that has not created the objective.
+        try:
+            score = self._read_bridge_score(MIC_SCORE, player)
+        except Exception:
+            score = None
+        if score is not None:
+            return score == 1
+        # Fail closed: OFF wins even if stale ON is still present.
+        if "vcmumble.mic.off" in tags:
+            return False
+        return "vcmumble.mic.on" in tags
 
     @staticmethod
     def _bounded_int(
