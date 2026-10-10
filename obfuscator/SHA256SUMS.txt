@@ -1,2 +1,2 @@
-cd196d7ba7d1abe5eca87c62f419e912bf31f510fb5d227be088e1cbce381443  addon/VC_Mumble_ItemMic_v2.15.46_protected.mcaddon
+1a6a91c74b377e7e71c37964100bab9240fa58d4d9e8a2fa38b46b63592c68f1  addon/VC_Mumble_ItemMic_v2.15.46_protected.mcaddon
 1e2a622fbdcf34c29d77d65fedd491d16221a3c52a2abbd4cc4b790ccbf0a58a  plugin/endstone_mumble_host-0.6.5-cp312-cp312-manylinux_2_28_x86_64.whl
