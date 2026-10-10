@@ -3,6 +3,8 @@
 #include <QtCore/QDateTime>
 #include <QtCore/QDebug>
 #include <QtCore/QHash>
+#include <QtCore/QMutex>
+#include <QtCore/QMutexLocker>
 #include <QtCore/QReadWriteLock>
 #include <QtCore/QReadLocker>
 #include <QtCore/QWriteLocker>
@@ -40,12 +42,25 @@ QHash<QString, CallState> g_calls;
 std::atomic_bool g_enabled{ false };
 std::atomic<qint64> g_staleTimeoutMs{ 45000 };
 std::atomic<qint64> g_lastStateLogMs{ 0 };
-std::atomic<qint64> g_lastRouteLogMs{ 0 };
 
 bool shouldLog(std::atomic<qint64> &slot, qint64 nowMs, qint64 intervalMs) {
     qint64 previous = slot.load(std::memory_order_relaxed);
     if ((nowMs - previous) < intervalMs) return false;
     return slot.compare_exchange_strong(previous, nowMs, std::memory_order_relaxed);
+}
+
+// Route lines are throttled per (speaker, listener, reason) so one pair's drops are
+// never hidden behind another pair's lines. Only speakers sending audio reach here.
+QMutex g_routeLogLock;
+QHash<QString, qint64> g_routeLogMs;
+
+bool shouldLogRoute(const QString &key, qint64 nowMs) {
+    QMutexLocker locker(&g_routeLogLock);
+    const qint64 previous = g_routeLogMs.value(key, 0);
+    if ((nowMs - previous) < 5000) return false;
+    if (g_routeLogMs.size() > 512) g_routeLogMs.clear();
+    g_routeLogMs.insert(key, nowMs);
+    return true;
 }
 
 QString keyFor(const QString &name) {
@@ -228,7 +243,7 @@ float attenuationFactor(const QString &speakerName, const QString &listenerName)
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
 
     auto finish = [&](float factor, const QString &reason, const QString &extra = QString()) -> float {
-        if (shouldLog(g_lastRouteLogMs, now, 1000)) {
+        if (shouldLogRoute(speakerName + QLatin1Char('|') + listenerName + QLatin1Char('|') + reason, now)) {
             qWarning().noquote()
                 << "[VC-PROX-ROUTE]"
                 << "speaker=" + speakerName

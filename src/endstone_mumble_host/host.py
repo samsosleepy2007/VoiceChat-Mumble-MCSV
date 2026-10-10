@@ -401,12 +401,18 @@ class MumbleRuntimeHost:
         if openssl_modules.exists():
             env["OPENSSL_MODULES"] = str(openssl_modules)
 
-        for log in (data / "mumble-stdout.log", data / "mumble-server.log"):
-            try:
-                if log.stat().st_size > LOG_LIMIT_BYTES:
-                    log.write_bytes(b"")
-            except OSError:
-                pass
+        # Start each run with a fresh stdout log (previous run kept as .prev) so the
+        # current log stays small enough to read from the panel.
+        try:
+            (data / "mumble-stdout.log").replace(data / "mumble-stdout.prev.log")
+        except OSError:
+            pass
+        log = data / "mumble-server.log"
+        try:
+            if log.stat().st_size > LOG_LIMIT_BYTES:
+                log.write_bytes(b"")
+        except OSError:
+            pass
         self._kill_stale_process()
         self._set_status("starting")
         with self._spawn:

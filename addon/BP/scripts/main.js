@@ -75,10 +75,17 @@ function micGlyph(player, hasMic, effective) {
   return talking ? GLYPH_TALKING : GLYPH_MIC_ON;
 }
 function applyNameGlyph(player, state, hasMic, effective) {
+  // Compare with the live name tag so a failed write or a game-side reset is repaired.
   const glyph = micGlyph(player, hasMic, effective);
-  if (state.nameGlyph === glyph) return;
-  state.nameGlyph = glyph;
-  try { player.nameTag = glyph ? player.name + " " + glyph : player.name; } catch {}
+  const wanted = glyph ? player.name + " " + glyph : player.name;
+  try {
+    if (player.nameTag === wanted) return;
+    player.nameTag = wanted;
+  } catch (e) {
+    if (system.currentTick - (state.lastNameWarnTick ?? -1000) < 200) return;
+    state.lastNameWarnTick = system.currentTick;
+    console.warn(`[VCMumbleItem/BP] name glyph failed player=${player.name}: ${e}`);
+  }
 }
 function applyActionBar(player, state, hasMic, effective) {
   if (player.getDynamicProperty(PROP_ACTIONBAR) !== true || !hasMic) { state.actionbarGlyph = undefined; return; }
@@ -3285,12 +3292,14 @@ async function maybeShowMicStatusIntro(player) {
     const form = new ActionFormData()
       .title("SleepyMic — สถานะไมค์")
       .body(
-        "แสดงสถานะไมค์ของคุณบนแถบ ActionBar ไหม?\n\n" +
-        "กำลังเปิดไมค์: " + GLYPH_MIC_ON + "    ปิดไมค์: " + GLYPH_MIC_OFF + "\n\n" +
-        "§7ชื่อของคุณจะมีสัญลักษณ์นี้ให้ผู้เล่นอื่นเห็นเสมอ ส่วน ActionBar เป็นของคุณคนเดียว\n" +
-        "แก้ไขได้ภายหลังในตั้งค่าของไอเทมไมค์§r"
+        "\n" +
+        "แสดงสถานะไมค์ของคุณบนแถบ ActionBar ไหม?\n" +
+        "\n" +
+        "§7สัญลักษณ์ไมค์จะแสดงหลังชื่อของคุณให้ผู้เล่นอื่นเห็นเสมอ ส่วน ActionBar เห็นแค่คุณคนเดียว\n" +
+        "\n" +
+        "แก้ไขได้ภายหลังในตั้งค่าของไอเทมไมค์§r\n"
       )
-      .button("แสดงใน ActionBar " + GLYPH_MIC_ON)
+      .button("แสดงใน ActionBar")
       .button("ไม่แสดง");
     const res = await form.show(player);
     if (res.canceled && res.cancelationReason === "UserBusy") return; // try again next spawn
@@ -3327,7 +3336,7 @@ async function showSettings(player) {
     const modeText = new ObservableString(`โหมด: §e${modeUiLabel(initial.mode)}§r\n`);
     const actionbarOn = () => player.getDynamicProperty(PROP_ACTIONBAR) === true;
     const actionbarText = new ObservableString(
-      `แสดงใน ActionBar: ${actionbarOn() ? "§aเปิด" : "§cปิด"}§r\n`
+      `\nแสดงใน ActionBar: ${actionbarOn() ? "§aเปิด" : "§cปิด"}§r\n`
     );
     const rangeText = new ObservableString(
       `ระยะเสียงปัจจุบัน: §b${initialRange} บล็อก§r\n`
@@ -3554,14 +3563,14 @@ async function showSettings(player) {
       )
       .spacer({ visible: settingsPageVisible })
       .divider({ visible: settingsPageVisible })
-      .header("สถานะไมค์ " + GLYPH_MIC_ON, { visible: settingsPageVisible })
+      .header("สถานะไมค์", { visible: settingsPageVisible })
       .label(actionbarText, { visible: settingsPageVisible })
-      .label("แสดงสัญลักษณ์ไมค์ของคุณบนแถบ ActionBar\n(ชื่อเหนือหัวจะมีสัญลักษณ์ให้คนอื่นเห็นเสมอ)\n", { visible: settingsPageVisible })
-      .button("สลับ แสดง/ไม่แสดง " + GLYPH_MIC_ON, () => {
+      .label("\nแสดงสัญลักษณ์ไมค์ของคุณบนแถบ ActionBar\n\nชื่อเหนือหัวจะมีสัญลักษณ์ให้คนอื่นเห็นเสมอ\n", { visible: settingsPageVisible })
+      .button("สลับ แสดง/ไม่แสดง", () => {
         const next = !actionbarOn();
         player.setDynamicProperty(PROP_ACTIONBAR, next);
         if (!next) { try { player.onScreenDisplay.setActionBar(""); } catch {} const st = states.get(player.id); if (st) st.actionbarGlyph = undefined; }
-        actionbarText.setData(`แสดงใน ActionBar: ${next ? "§aเปิด" : "§cปิด"}§r\n`);
+        actionbarText.setData(`\nแสดงใน ActionBar: ${next ? "§aเปิด" : "§cปิด"}§r\n`);
       }, { visible: settingsPageVisible })
       .spacer({ visible: settingsPageVisible })
       .divider({ visible: settingsPageVisible })
