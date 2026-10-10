@@ -16,7 +16,7 @@ const { alert } = await import('../web/join/lib/alerts.js');
 const { default: artifactHandler } = await import('../web/join/api/mcsv/artifact.js');
 
 // --- Signed artifact links -------------------------------------------------------------------------
-const params={kind:'plugin',version:'2.15.44'};const now=Date.now();
+const params={kind:'plugin',version:'2.15.45'};const now=Date.now();
 const signed={...params,...signArtifact(params,{now})};
 assert(verifyArtifact(signed,{now}));
 assert(!verifyArtifact({...signed,kind:'packs'},{now}),'changing a parameter breaks the signature');
@@ -65,7 +65,7 @@ assert.equal(forgedPlan.installation.parts.license,'invalid');
 console.log('PASS free-install bypass closed: planted wheel or forged license is not proof of purchase; installs require explicit authorization');
 
 // --- Wall-clock budget ------------------------------------------------------------------------------
-const weaveBytes=Buffer.from('w');const fixture={endweave:{info:{...BUNDLED,sha256:createHash('sha256').update(weaveBytes).digest('hex'),size:1},bytes:weaveBytes},wheel:Buffer.from('wheel'),packs:Object.fromEntries(PACKS.map(p=>[p.type,{'manifest.json':Buffer.from(JSON.stringify({header:{uuid:p.uuid,version:[2,15,44]}}))}]))};
+const weaveBytes=Buffer.from('w');const fixture={endweave:{info:{...BUNDLED,sha256:createHash('sha256').update(weaveBytes).digest('hex'),size:1},bytes:weaveBytes},wheel:Buffer.from('wheel'),packs:Object.fromEntries(PACKS.map(p=>[p.type,{'manifest.json':Buffer.from(JSON.stringify({header:{uuid:p.uuid,version:[2,15,45]}}))}]))};
 const slow=mockServer();
 await assert.rejects(installOnMCSV(slow.client,{serverId:'srv',world:'W',voicePort:18655},async()=>fixture,async()=>true,async()=>{},{budgetMs:-1}),e=>e.code==='install_timeout'&&e.partial===false);
 assert(!slow.calls.some(c=>['files_upload_base64','power_action'].includes(c.name)),'an install out of time stops before changing files');

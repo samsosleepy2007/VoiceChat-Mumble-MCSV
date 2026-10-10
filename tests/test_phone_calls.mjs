@@ -19,7 +19,7 @@ const context = vm.createContext({
   stateFor: p => p.state ??= { mode: 'toggle', micKnown: true, toggleLatched: p.normalOn, effective: p.normalOn },
   isMicId: id => id === 'on' || id === 'off', getMainId: () => 'phone', getOffId: () => '',
   getMode: () => 'toggle', setLatch: (p, value) => { p.normalOn = value; },
-  replaceMicStatus: (p, value) => { p.visualOn = value; },
+  replaceMicStatus: (p, value) => { p.visualOn = value; }, applyNameGlyph() {}, applyActionBar() {},
   publishMicState: (p, value) => { p.publishedOn = value; },
   system: { currentTick: 100, runInterval: f => { monitor = f; } },
   playerHasPhoneId: (p, id) => p.phone === id,

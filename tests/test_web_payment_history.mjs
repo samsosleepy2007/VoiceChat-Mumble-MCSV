@@ -16,7 +16,7 @@ const html=await readFile(new URL('../web/join/history.html',import.meta.url),'u
 // Embed layout: richer fields, admin/manual label, and the install details passed as `extra`.
 {
  const base={id:'00000000-0000-0000-0000-000000000000',user_id:'904046392106967122',user_name:'Buyer',server_name:'mic',amount_satang:100000,purchase_number:7,addon_state:'installed',plugin_state:'installed',paid_at:new Date().toISOString(),installation_updated_at:new Date().toISOString()};
- const paid=paymentEmbed({...base,payment_method:'promptpay'},'completed',{pluginVersion:'0.6.3',addonVersion:'2.15.44',endweaveVersion:'0.5.1',voicePort:18655,license:'valid'});
+ const paid=paymentEmbed({...base,payment_method:'promptpay'},'completed',{pluginVersion:'0.6.3',addonVersion:'2.15.45',endweaveVersion:'0.5.1',voicePort:18655,license:'valid'});
  const e=paid.embeds[0];const fv=n=>e.fields.find(f=>f.name===n).value;
  assert.match(e.title,/✅/);assert.match(e.description,/\*\*mic\*\*/);assert.match(e.description,/<@904046392106967122>/);
  assert.match(fv('เวอร์ชัน'),/MumbleHost 0\.6\.3/);assert.match(fv('เวอร์ชัน'),/Endweave 0\.5\.1/);
