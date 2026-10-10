@@ -28,6 +28,23 @@ assert.match(fv('เจ้าของ'),/SleepyOwner/);assert.match(fv('เจ�
 assert.equal(fv('ชื่อเซิร์ฟเวอร์'),'mic');assert.match(fv('พอร์ตทั้งหมด'),/10459/);
 assert(!embeds[0].embeds[0].fields.some(f=>f.name==='⚠ สถานะ'),'genuine has no suspicious flag');
 
+// A report carrying an online + ever-joined roster lists them, flags OPs, and caps/escapes input.
+embeds=[];ts=Math.floor(Date.now()/1000);
+const online=[{name:'Sam4014XD',xuid:'2535471173648691',op:true},{name:'`@grief*er`',xuid:'111',op:false}];
+const roster=Array.from({length:60},(_,i)=>({name:'P'+i,xuid:String(i),op:i===0}));
+r=await post({uuid:UUID,ip:'2.2.2.2',port:'10459',ts,v:'0.6.3',reason:'missing',sig:sign(UUID,String(ts)),online,roster},{ip:'2.2.2.2'});
+assert.equal(r.code,204);
+const pf=embeds[0].embeds[0].fields;const online_f=pf.find(x=>x.name.startsWith('กำลังออนไลน์')).value;const roster_f=pf.find(x=>x.name.startsWith('เคยเข้า')).value;
+assert.match(online_f,/👑 Sam4014XD \(2535471173648691\)/,'OP online player is crowned with xuid');
+assert.doesNotMatch(online_f,/[@`*]/,'player names are stripped of markdown/mentions');
+assert(roster_f.length<=1024,'roster field stays within a Discord field limit');
+assert(online_f.length<=1024);
+
+// A bogus online payload (not an array / junk entries) never breaks the alert.
+embeds=[];ts=Math.floor(Date.now()/1000);
+r=await post({uuid:UUID,ip:'4.4.4.4',port:'10459',ts,v:'0.6.3',reason:'missing',sig:sign(UUID,String(ts)),online:'nope',roster:[1,2,null]},{ip:'4.4.4.4'});
+assert.equal(embeds.length,1);assert(!embeds[0].embeds[0].fields.some(f=>f.name.startsWith('กำลังออนไลน์')),'junk online is dropped');
+
 // Suspicious: no signature.
 embeds=[];ts=Math.floor(Date.now()/1000);
 r=await post({uuid:UUID,ip:'1.0.0.2',port:'10459',ts,v:'0.6.3',reason:'missing',sig:'AAAA'+'B'.repeat(40)},{ip:'1.0.0.2'});

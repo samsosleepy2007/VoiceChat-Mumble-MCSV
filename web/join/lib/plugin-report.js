@@ -17,6 +17,21 @@ CREATE TABLE IF NOT EXISTS sleepy_rate_limits(key text NOT NULL,window_start tim
 const COOLDOWN_MS=30000, BURST=3, RATE={hits:12,minutes:10};
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const B64=/^[A-Za-z0-9+/]{40,120}={0,2}$/;
+// Render a plugin-sent player list into one Discord field value (≤1024 chars). Untrusted input:
+// strip markdown/mention characters and cap counts and lengths.
+const clean=v=>String(v==null?'':v).replace(/[@`*_~<>\\\n]/g,'').slice(0,40);
+function playerList(list,max){
+ if(!Array.isArray(list)||!list.length)return null;
+ const lines=[];let used=0;
+ for(const e of list.slice(0,max)){
+  if(!e||typeof e!=='object')continue;
+  const name=clean(e.name)||'(?)';const xuid=clean(e.xuid);const op=e.op===true;
+  const line=`${op?'👑 ':''}${name}${xuid?' ('+xuid+')':''}`;
+  if(used+line.length+1>1000){lines.push('…');break;}
+  lines.push(line);used+=line.length+1;
+ }
+ return lines.length?lines.join('\n'):null;
+}
 const configured=env=>Boolean(env.PAYMENT_DATABASE_URL||env.DATABASE_URL);
 
 function clientIP(req){
@@ -41,8 +56,8 @@ export async function pluginReport(req,res,{env=process.env,db=null,fetcher=fetc
   await ensure();
   // 1. Blacklisted source: drop before any work, logging or alert.
   if((await conn.query('SELECT 1 FROM sleepy_report_blacklist WHERE ip=$1',[ip])).rowCount)return res.status(403).end();
-  // 2. Size + shape.
-  if(Number(req.headers['content-length']||0)>1024)return res.status(413).end();
+  // 2. Size + shape. (Larger than the old 1KB: a report may now carry an online + ever-joined roster.)
+  if(Number(req.headers['content-length']||0)>16384)return res.status(413).end();
   let body;try{body=typeof req.body==='string'?JSON.parse(req.body):req.body;}catch{body=null;}
   const uuid=String(body?.uuid||'').toLowerCase();
   const claimedIP=String(body?.ip||'').slice(0,64);
@@ -85,6 +100,10 @@ export async function pluginReport(req,res,{env=process.env,db=null,fetcher=fetc
    {name:'เวอร์ชันปลั๊กอิน',value:String(body?.v||'-').slice(0,20)},{name:'เหตุผล license',value:String(body?.reason||'-').slice(0,40)},
    {name:'เวลา (ไทย)',value:new Date().toLocaleString('th-TH',{timeZone:'Asia/Bangkok'})}
   ];
+  const online=playerList(body?.online,20);
+  const roster=playerList(body?.roster,40);
+  if(online)fields.push({name:'กำลังออนไลน์ (👑 = OP)',value:online});
+  if(roster)fields.push({name:'เคยเข้าเซิร์ฟเวอร์ (ล่าสุดก่อน · 👑 = OP)',value:roster});
   if(!genuine)fields.push({name:'IP ที่อ้าง',value:claimedIP||'-'},{name:'⚠ สถานะ',value:'ลายเซ็น/ที่มาไม่ตรง — อาจไม่ได้มาจาก MCSV'});
   await postEmbed(genuine?'เซิร์ฟเปิดระบบโดยไม่มีใบอนุญาต':'ได้รับ report จากพื้นที่น่าสงสัย',fields,{color:genuine?0xef9f43:0x8a6dd0,env,fetcher});
   return done();

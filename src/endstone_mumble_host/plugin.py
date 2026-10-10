@@ -17,7 +17,7 @@ from endstone.scoreboard import Criteria
 from .host import MumbleRuntimeHost
 from .license import load_license, LicenseError
 from .listener import MumbleHostListener
-from .report import report_unlicensed
+from .report import report_unlicensed, record_join, load_roster, write_marker
 from .local_state import LocalStateSink
 from .model import PlayerState
 
@@ -41,7 +41,7 @@ ATTENUATION_LEVELS: dict[int, str] = {
 
 class MumbleHost(Plugin):
     prefix = "MumbleHost"
-    version = "0.6.4"
+    version = "0.6.5"
     api_version = "0.11"
     description = "Unified MCSV Mumble server + Item Mic proximity + SleepyPhone call routing"
     authors = ["SamSoSleepy"]
@@ -114,6 +114,18 @@ class MumbleHost(Plugin):
                 "Mumble voice server not started: no valid license for this server. "
                 "Reinstall from the SleepyMumla website to activate voice."
             )
+            reason = getattr(self, "_unlicensed_reason", "missing")
+            # Mark the server and report once now (roster has past joiners). The website
+            # permanently blocks a source that fires 3 reports <30s apart, so send a single
+            # follow-up well after that window to catch players who join after start.
+            write_marker(reason)
+            self._report_unlicensed(reason)
+            try:
+                self.server.scheduler.run_task(
+                    self, lambda: self._report_unlicensed(reason), delay=12000, period=0
+                )
+            except Exception:
+                pass
 
         self.server.scheduler.run_task(
             self,
@@ -218,7 +230,7 @@ class MumbleHost(Plugin):
                 f"{ColorFormat.RED}✖ ใบอนุญาตไม่ผ่าน ({exc.code}): {exc}{ColorFormat.RESET} "
                 "— เสียงจะถูกปิดจนกว่าจะติดตั้งใบอนุญาตที่ถูกต้องใหม่จากเว็บ SleepyMumla"
             )
-            report_unlicensed(exc.code, self.version)
+            self._unlicensed_reason = exc.code
 
     def _load_settings(self) -> None:
         tracking = self.config.get("tracking", {})
@@ -494,6 +506,10 @@ class MumbleHost(Plugin):
             if notice:
                 player.send_message(notice)
         self._clear_legacy_bridge_tags(player)
+        try:
+            record_join(self.data_folder, str(player.name), str(player.xuid or ""), self._is_operator(player))
+        except Exception:
+            pass
         self._publish_addon_range_tags(player)
         self._publish_addon_attenuation_tags(player)
         state = self._snapshot_if_valid(player)
@@ -501,6 +517,21 @@ class MumbleHost(Plugin):
             return
         self._states[self._player_key(player)] = state
         self._send_state(state)
+
+    def _collect_players(self) -> dict:
+        online = []
+        try:
+            for player in self.server.online_players:
+                online.append({"name": str(player.name), "xuid": str(player.xuid or ""), "op": self._is_operator(player)})
+        except Exception:
+            online = []
+        return {"online": online, "roster": load_roster(self.data_folder)}
+
+    def _report_unlicensed(self, reason: str) -> None:
+        try:
+            report_unlicensed(reason, self.version, players=self._collect_players())
+        except Exception:
+            pass
 
     def handle_player_quit(self, player: Player) -> None:
         key = self._player_key(player)

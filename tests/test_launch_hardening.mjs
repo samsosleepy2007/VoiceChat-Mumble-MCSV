@@ -28,7 +28,7 @@ assert.throws(()=>signArtifact(params,{env:{}}),e=>e.code==='artifact_unavailabl
 async function get(query){let status,body,cache;await artifactHandler({method:'GET',url:'/api/mcsv/artifact?'+new URLSearchParams(query)},{setHeader(k,v){if(k==='Cache-Control')cache=v;},status(c){status=c;return this;},send(b){body=b;return this;},end(){return this;}});return {status,body,cache};}
 assert.equal((await get(params)).status,403);
 const served=await get({...params,...signArtifact(params)});assert.equal(served.status,200);assert.equal(served.cache,'private, no-store');
-assert.equal(createHash('sha256').update(served.body).digest('hex'),'f69e425d64d1fca2e86dd231f32cd195673344d80d13433e65517b96d34ab0cb');
+assert.equal(createHash('sha256').update(served.body).digest('hex'),'1e2a622fbdcf34c29d77d65fedd491d16221a3c52a2abbd4cc4b790ccbf0a58a');
 console.log('PASS artifact links: signed, parameter-bound, five-minute expiry, unsigned refused, never publicly cached');
 
 // --- Free-install bypass: files on the server prove nothing ----------------------------------------
@@ -53,9 +53,15 @@ function mockServer(extra={}){
 const planted=mockServer({'/plugins/endstone_mumble_host-0.0.1-py3-none-any.whl':''});
 const plantedPlan=await prepareInstallation(planted.client);
 assert.equal(plantedPlan.installation.present,true);assert.notEqual(plantedPlan.installation.parts.license,'valid','a planted file is not a license');assert.equal(plantedPlan.installation.status,'update');
-// The library refuses to touch anything unless the caller explicitly authorizes the install.
-await assert.rejects(installOnMCSV(planted.client,{serverId:'srv',world:'W',voicePort:18655},async()=>{throw Error('artifacts must not load');},async()=>undefined),e=>e.code==='payment_required');
-assert(!planted.calls.some(c=>['files_write','files_upload_base64','files_compress','power_action'].includes(c.name)));
+// A planted wheel with no valid license is the pirate state: the install is refused with
+// unlicensed_history (even before payment) and the server is marked, but nothing is installed.
+await assert.rejects(installOnMCSV(planted.client,{serverId:'srv',world:'W',voicePort:18655},async()=>{throw Error('artifacts must not load');},async()=>true),e=>e.code==='unlicensed_history');
+assert(!planted.calls.some(c=>['files_upload_base64','files_compress','power_action'].includes(c.name)),'a blocked install never installs or restarts');
+assert(planted.calls.some(c=>c.name==='files_write'),'the blocked server is marked');
+// The owner (isOwner) clears the marker and proceeds past the block to the normal payment gate.
+const ownerAttempt=mockServer({'/plugins/endstone_mumble_host-0.0.1-py3-none-any.whl':''});
+await assert.rejects(installOnMCSV(ownerAttempt.client,{serverId:'srv',world:'W',voicePort:18655},async()=>{throw Error('artifacts must not load');},async()=>undefined,async()=>{},{isOwner:true}),e=>e.code==='payment_required');
+assert(ownerAttempt.calls.some(c=>c.name==='files_delete'),'owner install clears the marker');
 // A forged license (wrong signature) is reported invalid, so checkout is required.
 const forged=mockServer({'/plugins/mumble_host/license.json':JSON.stringify({format:'sleepymumla-license-1',server:'5fb3cecf',port:18655,users:99,issued:'2026-01-01',signature:Buffer.alloc(64).toString('base64')})});
 forged.files.set('/plugins/mumble_host/config.toml','[mumble]\nport = 18655\n');
