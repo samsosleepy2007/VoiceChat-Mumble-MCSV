@@ -41,7 +41,7 @@ ATTENUATION_LEVELS: dict[int, str] = {
 
 class MumbleHost(Plugin):
     prefix = "MumbleHost"
-    version = "0.6.3"
+    version = "0.6.4"
     api_version = "0.11"
     description = "Unified MCSV Mumble server + Item Mic proximity + SleepyPhone call routing"
     authors = ["SamSoSleepy"]

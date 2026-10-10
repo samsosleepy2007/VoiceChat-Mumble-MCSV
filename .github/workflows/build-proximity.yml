@@ -7,7 +7,7 @@ permissions:
 on:
   workflow_dispatch:
   push:
-    branches: [main, feature/mcsv-proximity-v0.3, feature/phone-mic-4-block-test, feat/talking-indicator]
+    branches: [main, feature/mcsv-proximity-v0.3, feature/phone-mic-4-block-test]
 
 jobs:
   build:
