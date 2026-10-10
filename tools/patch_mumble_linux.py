@@ -124,6 +124,29 @@ def patch_server_routing(murmur: pathlib.Path) -> None:
     server_cpp.write_text(text, encoding="utf-8")
 
 
+def patch_talk_hook(murmur: pathlib.Path) -> None:
+    server_cpp = murmur / "Server.cpp"
+    text = server_cpp.read_text(encoding="utf-8")
+    if "VC_TALK_NOTE" in text:
+        return
+    text = replace_once(
+        text,
+        "\t\tif (!bw->addFrame(static_cast< int >(packetsize), iMaxBandwidth / 8)) {\n"
+        "\t\t\t// Suppress packet.\n"
+        "\t\t\treturn;\n"
+        "\t\t}\n"
+        "\t}\n",
+        "\t\tif (!bw->addFrame(static_cast< int >(packetsize), iMaxBandwidth / 8)) {\n"
+        "\t\t\t// Suppress packet.\n"
+        "\t\t\treturn;\n"
+        "\t\t}\n"
+        "\t}\n"
+        "\tVCProximity::noteAudio(u->qsName); // VC_TALK_NOTE\n",
+        "processMsg bandwidth check",
+    )
+    server_cpp.write_text(text, encoding="utf-8")
+
+
 def patch_gain_trailer(source: pathlib.Path) -> None:
     protocol_cpp = source / "src" / "MumbleProtocol.cpp"
     text = protocol_cpp.read_text(encoding="utf-8")
@@ -225,6 +248,7 @@ def main() -> None:
         shutil.copyfile(patch_dir / name, murmur / name)
 
     patch_server_routing(murmur)
+    patch_talk_hook(murmur)
     patch_gain_trailer(source)
     patch_cmake(murmur)
     patch_main(murmur)
@@ -232,6 +256,7 @@ def main() -> None:
     checks = {
         "route": "VC_PROXIMITY_REGULAR_CHANNEL" in (murmur / "Server.cpp").read_text(),
         "gain": "VC_LEGACY_GAIN_TRAILER" in (source / "src" / "MumbleProtocol.cpp").read_text(),
+        "talk": "VC_TALK_NOTE" in (murmur / "Server.cpp").read_text(),
         "feed": "VC_PROXIMITY_STATE_FEED" in (murmur / "main.cpp").read_text(),
     }
     if not all(checks.values()):

@@ -13,12 +13,12 @@ import typing
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-for name in ['endstone', 'endstone.command', 'endstone.form', 'endstone.plugin', 'endstone.event']:
+for name in ['endstone', 'endstone.command', 'endstone.form', 'endstone.plugin', 'endstone.event', 'endstone.scoreboard']:
     sys.modules[name] = types.ModuleType(name)
 for module, names in {
     'endstone': ['Player'], 'endstone.command': ['Command', 'CommandSender'],
     'endstone.form': ['ActionForm'], 'endstone.plugin': ['Plugin'],
-    'endstone.event': ['PlayerJoinEvent', 'PlayerQuitEvent'],
+    'endstone.event': ['PlayerJoinEvent', 'PlayerQuitEvent'], 'endstone.scoreboard': ['Criteria'],
 }.items():
     for name in names:
         setattr(sys.modules[module], name, type(name, (), {}))
@@ -72,19 +72,19 @@ def exercise(path):
 
 import glob
 expected = exercise(ROOT / 'src')
-matches = glob.glob(str(ROOT / 'obfuscator/plugin/endstone_mumble_host-0.6.3-*.whl'))
+matches = glob.glob(str(ROOT / 'obfuscator/plugin/endstone_mumble_host-0.6.4-*.whl'))
 assert len(matches) == 1, matches
 wheel = Path(matches[0])
 native = '-cp3' in wheel.name  # compiled modules only import under the matching Python
 with zipfile.ZipFile(wheel) as archive, tempfile.TemporaryDirectory() as temp:
     assert archive.testzip() is None
-    for name, digest, size in csv.reader(io.StringIO(archive.read('endstone_mumble_host-0.6.3.dist-info/RECORD').decode())):
+    for name, digest, size in csv.reader(io.StringIO(archive.read('endstone_mumble_host-0.6.4.dist-info/RECORD').decode())):
         if not digest:
             continue
         data = archive.read(name)
         assert len(data) == int(size)
         assert digest == 'sha256=' + base64.urlsafe_b64encode(hashlib.sha256(data).digest()).decode().rstrip('=')
-    assert b'mumble_host = endstone_mumble_host:MumbleHost' in archive.read('endstone_mumble_host-0.6.3.dist-info/entry_points.txt')
+    assert b'mumble_host = endstone_mumble_host:MumbleHost' in archive.read('endstone_mumble_host-0.6.4.dist-info/entry_points.txt')
     members = archive.namelist()
     for name in members:
         if name.endswith('.py'):

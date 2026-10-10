@@ -7,7 +7,7 @@ export default async function handler(req,res){
  if(req.method!=='GET')return res.status(405).end();
  const query=new URL(req.url,'https://localhost').searchParams;
  if(!['packs','plugin','endweave'].includes(query.get('kind'))||[...query.keys()].some(k=>!['kind','behavior','resource','version','sha','exp','t'].includes(k))||new Set(query.keys()).size!==[...query.keys()].length||[...query.values()].some(v=>v.length>512))return res.status(400).end();
- if(query.get('version')!=='2.15.45')return res.status(400).end();
+ if(query.get('version')!=='2.15.46')return res.status(400).end();
  // Only links minted by the installer for this transfer are honoured (see lib/artifact-token.js).
  res.setHeader('Cache-Control','private, no-store');
  if(!verifyArtifact(Object.fromEntries(query)))return res.status(403).end();

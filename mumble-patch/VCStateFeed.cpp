@@ -1,7 +1,9 @@
 #include "VCStateFeed.h"
 #include "VCProximity.h"
 
+#include <QDateTime>
 #include <QHostAddress>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
@@ -9,7 +11,10 @@
 #include <QDebug>
 
 VCStateFeed::VCStateFeed(QObject *parent)
-    : QObject(parent), m_socket(this) {
+    : QObject(parent), m_socket(this), m_talkTimer(this) {
+    // VC_TALK_FEED: report who is sending voice back to the plugin's socket.
+    m_talkTimer.setInterval(100);
+    QObject::connect(&m_talkTimer, &QTimer::timeout, this, [this]() { publishTalkers(); });
     QObject::connect(
         &m_socket,
         &QUdpSocket::readyRead,
@@ -29,6 +34,7 @@ bool VCStateFeed::start(quint16 port) {
         QUdpSocket::DontShareAddress
     );
     if (ok) {
+        m_talkTimer.start();
         qWarning().noquote() << "[VC-PROX-FEED]"
                              << "listening=127.0.0.1:" + QString::number(port);
     } else {
@@ -48,8 +54,31 @@ void VCStateFeed::readPendingDatagrams() {
             && datagram.senderAddress() != QHostAddress::LocalHostIPv6) {
             continue;
         }
+        m_replyAddress = datagram.senderAddress();
+        m_replyPort = static_cast< quint16 >(datagram.senderPort());
         applyDatagram(datagram.data());
     }
+}
+
+void VCStateFeed::publishTalkers() {
+    if (m_replyPort == 0) {
+        return;
+    }
+    // Hold 400 ms after the last packet so short pauses between words do not flicker.
+    const QStringList talkers = VCProximity::activeTalkers(400);
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (talkers == m_lastTalkers && now - m_lastTalkSentMs < 2000) {
+        return;
+    }
+    if (talkers != m_lastTalkers) {
+        qWarning().noquote() << "[VC-TALK]" << "talkers=" + (talkers.isEmpty() ? QStringLiteral("-") : talkers.join(QLatin1Char(',')));
+    }
+    m_lastTalkers = talkers;
+    m_lastTalkSentMs = now;
+    QJsonObject message;
+    message.insert(QStringLiteral("type"), QStringLiteral("talking"));
+    message.insert(QStringLiteral("names"), QJsonArray::fromStringList(talkers));
+    m_socket.writeDatagram(QJsonDocument(message).toJson(QJsonDocument::Compact), m_replyAddress, m_replyPort);
 }
 
 void VCStateFeed::applyDatagram(const QByteArray &payload) {

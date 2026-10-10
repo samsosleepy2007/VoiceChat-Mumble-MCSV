@@ -43,21 +43,68 @@ const PROP_VOICE_RANGE = "vcmumble:voice_range";
 const PROP_ACTIONBAR = "vcmumble:show_actionbar";
 const PROP_INTRO_SEEN = "vcmumble:mic_status_intro";
 // Mic-status glyphs live in addon/RP/font/glyph_E9.png (auto-loaded for U+E9xx).
-// TALKING is reserved for when a live 'is-speaking' signal exists; mic-on uses MIC_ON for now.
+// Frequently-changing bridge state lives in scoreboard scores. Churning tags left
+// players with duplicate, unremovable mic tags (both on and off) after mic toggles,
+// which silenced them in both directions until the tags were cleaned up.
+const MIC_SCORE = "vcmumble_mic";          // addon -> MumbleHost: 1 mic on, 0 off
+const TALK_SCORE = "vcmumble_talk";        // MumbleHost -> addon: 1 while sending voice
+const ENDSTONE_SEEN_SCORE = "vcmumble_ep"; // MumbleHost echo of the mic state it read
+const LEGACY_BRIDGE_TAGS = ["vcmumble.mic.on", "vcmumble.mic.off", "vcmumble.talking", "vcmumble.ep.on", "vcmumble.ep.off"];
+function bridgeObjective(id) {
+  try { return world.scoreboard.getObjective(id) ?? world.scoreboard.addObjective(id, id); } catch { return undefined; }
+}
+function readBridgeScore(id, player) {
+  try { return world.scoreboard.getObjective(id)?.getScore(player); } catch { return undefined; }
+}
+function clearLegacyBridgeTags(player) {
+  for (const tag of LEGACY_BRIDGE_TAGS) {
+    try {
+      for (let i = 0; i < 8 && player.hasTag(tag); i++) player.removeTag(tag);
+      if (player.hasTag(tag)) {
+        try { player.runCommand(`tag @s remove ${tag}`); } catch {}
+        if (player.hasTag(tag)) console.warn(`[VCMumbleItem/BP] LEGACY_TAG_STUCK player=${player.name} tag=${tag}`);
+      }
+    } catch {}
+  }
+}
+// Warn when MumbleHost's view of the mic disagrees with the addon for 2 s.
+function checkEndstoneAgreement(player, state, effective) {
+  const seen = readBridgeScore(ENDSTONE_SEEN_SCORE, player);
+  if (seen === undefined) return;
+  if ((seen === 1) === effective) { state.micMismatchSince = undefined; return; }
+  if (state.micMismatchSince === undefined) { state.micMismatchSince = system.currentTick; return; }
+  if (system.currentTick - state.micMismatchSince < 40) return;
+  if (system.currentTick - (state.lastMismatchWarnTick ?? -1000) < 200) return;
+  state.lastMismatchWarnTick = system.currentTick;
+  console.warn(
+    `[VCMumbleItem/BP] MIC_MISMATCH player=${player.name} addon=${effective ? "ON" : "OFF"} endstone=${seen === 1 ? "ON" : "OFF"} for_ticks=${system.currentTick - state.micMismatchSince} mic_score=${readBridgeScore(MIC_SCORE, player) ?? "-"}`
+  );
+}
 const GLYPH_TALKING = "\uE900";
 const GLYPH_MIC_ON = "\uE902";
 const GLYPH_MIC_OFF = "\uE910";
 const ACTIONBAR_REFRESH_TICKS = 20;
-function micGlyph(hasMic, effective) { return hasMic ? (effective ? GLYPH_MIC_ON : GLYPH_MIC_OFF) : null; }
+function micGlyph(player, hasMic, effective) {
+  if (!hasMic) return null;
+  if (!effective) return GLYPH_MIC_OFF;
+  return readBridgeScore(TALK_SCORE, player) === 1 ? GLYPH_TALKING : GLYPH_MIC_ON;
+}
 function applyNameGlyph(player, state, hasMic, effective) {
-  const glyph = micGlyph(hasMic, effective);
-  if (state.nameGlyph === glyph) return;
-  state.nameGlyph = glyph;
-  try { player.nameTag = glyph ? player.name + " " + glyph : player.name; } catch {}
+  // Compare with the live name tag so a failed write or a game-side reset is repaired.
+  const glyph = micGlyph(player, hasMic, effective);
+  const wanted = glyph ? player.name + " " + glyph : player.name;
+  try {
+    if (player.nameTag === wanted) return;
+    player.nameTag = wanted;
+  } catch (e) {
+    if (system.currentTick - (state.lastNameWarnTick ?? -1000) < 200) return;
+    state.lastNameWarnTick = system.currentTick;
+    console.warn(`[VCMumbleItem/BP] name glyph failed player=${player.name}: ${e}`);
+  }
 }
 function applyActionBar(player, state, hasMic, effective) {
   if (player.getDynamicProperty(PROP_ACTIONBAR) !== true || !hasMic) { state.actionbarGlyph = undefined; return; }
-  const glyph = micGlyph(hasMic, effective) || "";
+  const glyph = micGlyph(player, hasMic, effective) || "";
   if (state.actionbarGlyph === glyph && system.currentTick - (state.lastActionbarTick ?? -100) < ACTIONBAR_REFRESH_TICKS) return;
   state.actionbarGlyph = glyph; state.lastActionbarTick = system.currentTick;
   try { player.onScreenDisplay.setActionBar(glyph); } catch {}
@@ -67,8 +114,6 @@ const LEGACY_PROP_LATCH = "voicecraft:toggle_latched";
 const LEGACY_PROP_VOICE_RANGE = "voicecraft:voice_range";
 
 // Contract implemented by feature/minecraft-mic-addon-v1.
-const MIC_ON_TAG = "vcmumble.mic.on";
-const MIC_OFF_TAG = "vcmumble.mic.off";
 const RANGE_VALUE_PREFIX = "vcmumble.vr.value.";
 const RANGE_REQUEST_PREFIX = "vcmumble.vr.request.";
 const RANGE_MAX_PREFIX = "vcmumble.vr.max.";
@@ -357,33 +402,15 @@ function reassertMicFlags(player) {
 }
 
 function publishMicState(player, on) {
-  const wanted = on ? MIC_ON_TAG : MIC_OFF_TAG;
-  const unwanted = on ? MIC_OFF_TAG : MIC_ON_TAG;
-
+  const value = on ? 1 : 0;
   try {
-    // Keep the two bridge tags strictly mutually exclusive. Some worlds can
-    // retain an old OFF tag while the visual Mic item has already switched ON.
-    try {
-      if (player.hasTag(unwanted)) player.removeTag(unwanted);
-    } catch {}
-    try {
-      if (!player.hasTag(wanted)) player.addTag(wanted);
-    } catch {}
-
-    let tags = [];
-    try {
-      tags = player.getTags();
-    } catch {}
-    const correct = tags.includes(wanted) && !tags.includes(unwanted);
-
-    // Command fallback repairs tag state if Script API tag mutation did not
-    // become visible immediately to Endstone. Only runs when verification fails.
-    if (!correct) {
-      try { player.runCommand(`tag @s remove ${unwanted}`); } catch {}
-      try { player.runCommand(`tag @s add ${wanted}`); } catch {}
-    }
+    const objective = bridgeObjective(MIC_SCORE);
+    if (!objective) return;
+    let current;
+    try { current = objective.getScore(player); } catch {} // no scoreboard identity yet
+    if (current !== value) objective.setScore(player, value);
   } catch (e) {
-    console.warn(`[VCMumbleItem/BP] mic tag sync failed player=${player.name}: ${e}`);
+    console.warn(`[VCMumbleItem/BP] mic score sync failed player=${player.name}: ${e}`);
   }
 }
 function stateFor(player) {
@@ -431,6 +458,7 @@ function evaluate(player) {
     }
     applyNameGlyph(player, state, true, true);
     applyActionBar(player, state, true, true);
+    checkEndstoneAgreement(player, state, true);
     state.lastMainMic = mainMic;
     return;
   }
@@ -482,6 +510,7 @@ function evaluate(player) {
   }
   applyNameGlyph(player, state, hasMic, effective);
   applyActionBar(player, state, hasMic, effective);
+  checkEndstoneAgreement(player, state, effective);
   state.lastMainMic = mainMic;
 }
 
@@ -3258,12 +3287,14 @@ async function maybeShowMicStatusIntro(player) {
     const form = new ActionFormData()
       .title("SleepyMic — สถานะไมค์")
       .body(
-        "แสดงสถานะไมค์ของคุณบนแถบ ActionBar ไหม?\n\n" +
-        "กำลังเปิดไมค์: " + GLYPH_MIC_ON + "    ปิดไมค์: " + GLYPH_MIC_OFF + "\n\n" +
-        "§7ชื่อของคุณจะมีสัญลักษณ์นี้ให้ผู้เล่นอื่นเห็นเสมอ ส่วน ActionBar เป็นของคุณคนเดียว\n" +
-        "แก้ไขได้ภายหลังในตั้งค่าของไอเทมไมค์§r"
+        "\n" +
+        "แสดงสถานะไมค์ของคุณบนแถบ ActionBar ไหม?\n" +
+        "\n" +
+        "§7สัญลักษณ์ไมค์จะแสดงหลังชื่อของคุณให้ผู้เล่นอื่นเห็นเสมอ ส่วน ActionBar เห็นแค่คุณคนเดียว\n" +
+        "\n" +
+        "แก้ไขได้ภายหลังในตั้งค่าของไอเทมไมค์§r\n"
       )
-      .button("แสดงใน ActionBar " + GLYPH_MIC_ON)
+      .button("แสดงใน ActionBar")
       .button("ไม่แสดง");
     const res = await form.show(player);
     if (res.canceled && res.cancelationReason === "UserBusy") return; // try again next spawn
@@ -3300,7 +3331,7 @@ async function showSettings(player) {
     const modeText = new ObservableString(`โหมด: §e${modeUiLabel(initial.mode)}§r\n`);
     const actionbarOn = () => player.getDynamicProperty(PROP_ACTIONBAR) === true;
     const actionbarText = new ObservableString(
-      `แสดงใน ActionBar: ${actionbarOn() ? "§aเปิด" : "§cปิด"}§r\n`
+      `\nแสดงใน ActionBar: ${actionbarOn() ? "§aเปิด" : "§cปิด"}§r\n`
     );
     const rangeText = new ObservableString(
       `ระยะเสียงปัจจุบัน: §b${initialRange} บล็อก§r\n`
@@ -3527,14 +3558,14 @@ async function showSettings(player) {
       )
       .spacer({ visible: settingsPageVisible })
       .divider({ visible: settingsPageVisible })
-      .header("สถานะไมค์ " + GLYPH_MIC_ON, { visible: settingsPageVisible })
+      .header("สถานะไมค์", { visible: settingsPageVisible })
       .label(actionbarText, { visible: settingsPageVisible })
-      .label("แสดงสัญลักษณ์ไมค์ของคุณบนแถบ ActionBar\n(ชื่อเหนือหัวจะมีสัญลักษณ์ให้คนอื่นเห็นเสมอ)\n", { visible: settingsPageVisible })
-      .button("สลับ แสดง/ไม่แสดง " + GLYPH_MIC_ON, () => {
+      .label("\nแสดงสัญลักษณ์ไมค์ของคุณบนแถบ ActionBar\n\nชื่อเหนือหัวจะมีสัญลักษณ์ให้คนอื่นเห็นเสมอ\n", { visible: settingsPageVisible })
+      .button("สลับ แสดง/ไม่แสดง", () => {
         const next = !actionbarOn();
         player.setDynamicProperty(PROP_ACTIONBAR, next);
         if (!next) { try { player.onScreenDisplay.setActionBar(""); } catch {} const st = states.get(player.id); if (st) st.actionbarGlyph = undefined; }
-        actionbarText.setData(`แสดงใน ActionBar: ${next ? "§aเปิด" : "§cปิด"}§r\n`);
+        actionbarText.setData(`\nแสดงใน ActionBar: ${next ? "§aเปิด" : "§cปิด"}§r\n`);
       }, { visible: settingsPageVisible })
       .spacer({ visible: settingsPageVisible })
       .divider({ visible: settingsPageVisible })
@@ -3693,6 +3724,7 @@ world.afterEvents.playerSpawn.subscribe((ev) => {
     }
     if (ev.initialSpawn === true) {
       cleanupLegacyVoiceCraftBridgeTags(player);
+      clearLegacyBridgeTags(player);
       migrateDynamicProperties(player);
       states.delete(player.id);
     }
@@ -3729,7 +3761,7 @@ world.afterEvents.playerLeave.subscribe((ev) => {
 });
 
 // One-tick evaluation keeps Hold-to-Talk responsive and immediately mirrors
-// the state into vcmumble.mic.on/off for the Endstone plugin.
+// the state into the vcmumble_mic score for the Endstone plugin.
 system.runInterval(() => {
   for (const player of world.getAllPlayers()) {
     try {
@@ -3783,7 +3815,7 @@ staggerPlayerWork("inventory_maintenance", 100, () => world.getAllPlayers(), pla
 });
 
 console.warn(
-  "[VCMumbleItem/BP] Loaded v2.15.45 — mic-status glyphs, staggered maintenance and bounded bank notifications"
+  "[VCMumbleItem/BP] Loaded v2.15.46 — talking glyph, mic-status glyphs, staggered maintenance and bounded bank notifications"
 );
 
 // Verify real item registration and per-item metadata without giving test items.
