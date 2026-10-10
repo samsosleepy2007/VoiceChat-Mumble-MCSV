@@ -70,6 +70,9 @@ void VCStateFeed::publishTalkers() {
     if (talkers == m_lastTalkers && now - m_lastTalkSentMs < 2000) {
         return;
     }
+    if (talkers != m_lastTalkers) {
+        qWarning().noquote() << "[VC-TALK]" << "talkers=" + (talkers.isEmpty() ? QStringLiteral("-") : talkers.join(QLatin1Char(',')));
+    }
     m_lastTalkers = talkers;
     m_lastTalkSentMs = now;
     QJsonObject message;

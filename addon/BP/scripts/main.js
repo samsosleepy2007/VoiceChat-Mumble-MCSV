@@ -45,6 +45,24 @@ const PROP_INTRO_SEEN = "vcmumble:mic_status_intro";
 // Mic-status glyphs live in addon/RP/font/glyph_E9.png (auto-loaded for U+E9xx).
 // TALKING shows while MumbleHost tags the player as sending voice (vcmumble.talking).
 const TALKING_TAG = "vcmumble.talking";
+// MumbleHost echoes the mic state it reads from Endstone; warn when it disagrees for 2 s.
+const ENDSTONE_SEEN_ON_TAG = "vcmumble.ep.on";
+const ENDSTONE_SEEN_OFF_TAG = "vcmumble.ep.off";
+function checkEndstoneAgreement(player, state, effective) {
+  let seenOn = false, seenOff = false;
+  try { seenOn = player.hasTag(ENDSTONE_SEEN_ON_TAG); seenOff = player.hasTag(ENDSTONE_SEEN_OFF_TAG); } catch { return; }
+  if (!seenOn && !seenOff) return;
+  if (effective ? seenOn : seenOff) { state.micMismatchSince = undefined; return; }
+  if (state.micMismatchSince === undefined) { state.micMismatchSince = system.currentTick; return; }
+  if (system.currentTick - state.micMismatchSince < 40) return;
+  if (system.currentTick - (state.lastMismatchWarnTick ?? -1000) < 200) return;
+  state.lastMismatchWarnTick = system.currentTick;
+  let tags = [];
+  try { tags = player.getTags().filter(tag => tag.startsWith("vcmumble.mic.") || tag.startsWith("vcmumble.ep.") || tag === "vcmumble.call.mic"); } catch {}
+  console.warn(
+    `[VCMumbleItem/BP] MIC_MISMATCH player=${player.name} addon=${effective ? "ON" : "OFF"} endstone=${seenOn ? "ON" : "OFF"} for_ticks=${system.currentTick - state.micMismatchSince} tags=${tags.join(",") || "-"}`
+  );
+}
 const GLYPH_TALKING = "\uE900";
 const GLYPH_MIC_ON = "\uE902";
 const GLYPH_MIC_OFF = "\uE910";
@@ -438,6 +456,7 @@ function evaluate(player) {
     }
     applyNameGlyph(player, state, true, true);
     applyActionBar(player, state, true, true);
+    checkEndstoneAgreement(player, state, true);
     state.lastMainMic = mainMic;
     return;
   }
@@ -489,6 +508,7 @@ function evaluate(player) {
   }
   applyNameGlyph(player, state, hasMic, effective);
   applyActionBar(player, state, hasMic, effective);
+  checkEndstoneAgreement(player, state, effective);
   state.lastMainMic = mainMic;
 }
 

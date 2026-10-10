@@ -21,6 +21,8 @@ from .local_state import LocalStateSink
 from .model import PlayerState
 
 TALKING_TAG = "vcmumble.talking"
+ENDSTONE_SEEN_ON_TAG = "vcmumble.ep.on"
+ENDSTONE_SEEN_OFF_TAG = "vcmumble.ep.off"
 
 
 ATTENUATION_LEVELS: dict[int, str] = {
@@ -82,6 +84,7 @@ class MumbleHost(Plugin):
         self._license: Any = None
         self._last_host_running = False
         self._tick_error_logged = 0.0
+        self._talk_log_at: dict[str, float] = {}
 
     def on_enable(self) -> None:
         # Endstone may enable the same instance after disable. A shutdown
@@ -879,17 +882,37 @@ class MumbleHost(Plugin):
             pass
 
     def _sync_talking_tag(self, player: Player, voice_enabled: bool) -> None:
-        # The addon swaps the name/ActionBar glyph while this tag is present.
+        # The tag follows the voice server only; the addon combines it with its own
+        # mic state, so a stale Endstone view of the mic tags cannot hide the glyph.
         sink = self._state_sink
-        talking = voice_enabled and sink is not None and str(player.name) in sink.talkers
+        name = str(player.name)
+        talking = sink is not None and name in sink.talkers
         try:
-            has_tag = TALKING_TAG in player.scoreboard_tags
+            tags = set(player.scoreboard_tags)
         except Exception:
             return
-        if talking and not has_tag:
+        # Echo Endstone's view of the mic so the addon can report disagreements.
+        seen = ENDSTONE_SEEN_ON_TAG if voice_enabled else ENDSTONE_SEEN_OFF_TAG
+        stale = ENDSTONE_SEEN_OFF_TAG if voice_enabled else ENDSTONE_SEEN_ON_TAG
+        if stale in tags:
+            self._remove_player_tag(player, stale)
+        if seen not in tags:
+            self._add_player_tag(player, seen)
+        has_tag = TALKING_TAG in tags
+        if talking == has_tag:
+            return
+        if talking:
             self._add_player_tag(player, TALKING_TAG)
-        elif not talking and has_tag:
+        else:
             self._remove_player_tag(player, TALKING_TAG)
+        now = time.monotonic()
+        if talking and not voice_enabled or now - self._talk_log_at.get(name, 0.0) >= 2.0:
+            self._talk_log_at[name] = now
+            mic_tags = sorted(tag for tag in tags if tag.startswith("vcmumble.mic.") or tag == "vcmumble.call.mic")
+            self.logger.info(
+                f"TALK_STATE player={name} talking={'ON' if talking else 'OFF'} "
+                f"endstone_mic={'ON' if voice_enabled else 'OFF'} tags={','.join(mic_tags) or '-'}"
+            )
 
     @staticmethod
     def _add_player_tag(player: Player, tag: str) -> None:
