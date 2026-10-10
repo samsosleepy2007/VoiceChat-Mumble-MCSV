@@ -8,3 +8,8 @@ export function isAdmin(userId, env = process.env) {
   const extra = String(env.ADMIN_DISCORD_IDS || '').split(',').map(id => id.trim()).filter(id => /^\d{17,20}$/.test(id));
   return OWNER_IDS.includes(userId) || extra.includes(userId);
 }
+
+// The hard-coded owner only (not ADMIN_DISCORD_IDS): clears a server's unlicensed-history block.
+export function isOwner(userId) {
+  return typeof userId === 'string' && OWNER_IDS.includes(userId);
+}

@@ -5,14 +5,34 @@ import { signLicense, licenseEnabled, verifyLicense, LICENSE_USERS, issuedToday 
 import { BUNDLED as ENDWEAVE_BUNDLED, endweaveVersion, publicEndweave } from './endweave.js';
 import { signArtifact } from './artifact-token.js';
 
-export const WHEEL='endstone_mumble_host-0.6.4-cp312-cp312-manylinux_2_28_x86_64.whl';
+export const WHEEL='endstone_mumble_host-0.6.5-cp312-cp312-manylinux_2_28_x86_64.whl';
 export const PACKS=[{type:'behavior',uuid:'b6411120-cc4e-44a9-b28d-f43b10cafd86',folder:'SleepyMumla_BP'},{type:'resource',uuid:'cb345edb-6e6c-49ac-9950-e2ae07bda214',folder:'SleepyMumla_RP'}];
 const VERSION=[2,15,46];
-const PLUGIN_VERSION=[0,6,4];
+const PLUGIN_VERSION=[0,6,5];
 function compareVersion(a,b){if(!Array.isArray(a)||a.length!==3||a.some(n=>!Number.isSafeInteger(n)||n<0))fail('existing_version');for(let i=0;i<3;i++)if(a[i]!==b[i])return a[i]>b[i]?1:-1;return 0;}
 const REQUIRED=['server_overview','files_list','files_read','files_read_many','files_read_base64','files_fetch_url','files_decompress','files_write','files_edit','files_compress','domain_info','power_action'];
 const validName=name=>typeof name==='string'&&name.length>0&&name!=='.'&&name!=='..'&&!/[\\/\x00-\x1f]/.test(name);
 function fail(code){throw new MCSVError(code);}
+// Obscure, deterministic marker for a server that has run unlicensed. Must hash the same value the
+// plugin hashes (the 8-hex pelican identifier) so both agree on the path. See report.py marker_relpath.
+export function unlicensedMarker(identifier){
+ if(typeof identifier!=='string'||!/^[0-9a-f]{8}$/.test(identifier))return null;
+ const hex=createHash('sha256').update('sleepy-mark:'+identifier).digest('hex');
+ return {dir:hex.slice(0,16),file:'.'+hex.slice(16,32)};
+}
+async function markerPresent(client,identifier,root){
+ const mark=unlicensedMarker(identifier);if(!mark)return false;
+ if(!root.some(f=>f.name===mark.dir&&!f.is_file))return false;
+ try{const entries=await listing(client,'/'+mark.dir);return entries.some(f=>f.name===mark.file&&f.is_file);}catch{return false;}
+}
+export async function writeMarker(client,identifier,reason){
+ const mark=unlicensedMarker(identifier);if(!mark)return;
+ try{await client.call('files_write',{path:'/'+mark.dir+'/'+mark.file,force_new:false,content:JSON.stringify({reason:String(reason).slice(0,40),first_seen:Math.floor(Date.now()/1000)})});}catch{}
+}
+async function deleteMarker(client,identifier){
+ const mark=unlicensedMarker(identifier);if(!mark)return;
+ try{await client.call('files_delete',{root:'/',files:[mark.dir]});}catch{}
+}
 export function createMCSVClient(key,request=fetch){
  if(typeof key!=='string'||key.length>512||!/^mcsv_[A-Za-z0-9_-]{8,}$/.test(key))fail('invalid_key');
  async function call(name,args={},catalog=false){
@@ -108,11 +128,18 @@ export async function prepareInstallation(client,{endweave=ENDWEAVE_BUNDLED}={})
  const addon=PACKS.every(p=>existing[p.type]&&compareVersion(versions[p.type],VERSION)===0&&JSON.parse(packLists[p.type].content).some(e=>e.pack_id.toLowerCase()===p.uuid&&compareVersion(e.version,VERSION)===0))?'current':Object.keys(existing).length?'update':'absent';
  const current=plugin==='current'&&addon==='current'&&['current','newer'].includes(weave.status)&&license==='valid';
  const installation={present,status:current?'current':present?'update':'absent',parts:{plugin,addon,endweave:weave.status,license},pluginVersions:pluginVersions.map(v=>v.join('.')),addonVersions:Object.fromEntries(Object.entries(versions).map(([k,v])=>[k,v.join('.')])),endweaveVersions:weave.versions,latest:{plugin:PLUGIN_VERSION.join('.'),addon:VERSION.join('.'),endweave:publicEndweave(endweave)}};
- return {compatible:true,server,installAllowed:true,world,ports,voicePort,installation,state:overview.runtime?.current_state||'unknown',canStart:allowed('power_action'),internal:{existing,packLists,config,root,pluginFiles,obsoletePlugins,endweaveFiles,canDelete:allowed('files_delete')}};
+ // A server that has run unlicensed is marked (by the plugin, or by us below) and is refused a
+ // reinstall unless the owner does it. A wheel present with an invalid/missing license is the same
+ // pirate state even if the report/marker was stripped. A clean first-time install has no wheel, so
+ // it is never flagged.
+ const markPresent=await markerPresent(client,server.identifier,root);
+ const pirateNow=wheels.length>0&&license!=='valid';
+ const unlicensedHistory=markPresent||pirateNow;
+ return {compatible:true,server,installAllowed:true,world,ports,voicePort,installation,unlicensedHistory,state:overview.runtime?.current_state||'unknown',canStart:allowed('power_action'),internal:{existing,packLists,config,root,pluginFiles,obsoletePlugins,endweaveFiles,canDelete:allowed('files_delete'),markPresent}};
 }
 export function publicPlan(plan){const {internal,...publicData}=plan;return publicData;}
 export async function fetchArtifacts(request,release){
- const definitions=[{name:'plugin/'+WHEEL,hash:'f69e425d64d1fca2e86dd231f32cd195673344d80d13433e65517b96d34ab0cb'},{name:'addon/VC_Mumble_ItemMic_v2.15.46_protected.mcaddon',hash:'36fbbc60aefdbfb5e40667da0dbc898a3fb580f914848f8f79ec2f9ecac0da8b'}];
+ const definitions=[{name:'plugin/'+WHEEL,hash:'1e2a622fbdcf34c29d77d65fedd491d16221a3c52a2abbd4cc4b790ccbf0a58a'},{name:'addon/VC_Mumble_ItemMic_v2.15.46_protected.mcaddon',hash:'36fbbc60aefdbfb5e40667da0dbc898a3fb580f914848f8f79ec2f9ecac0da8b'}];
  const bytes=[];for(const item of definitions){let response;try{response=await request(release+item.name,{signal:AbortSignal.timeout(30000)});}catch{fail('artifact_unavailable');}if(!response.ok)fail('artifact_unavailable');const buffer=Buffer.from(await response.arrayBuffer());if(buffer.length>4000000||createHash('sha256').update(buffer).digest('hex')!==item.hash)fail('artifact_integrity');bytes.push(buffer);}
  const addon=unzipSync(bytes[1]);const packs={};for(const pack of PACKS){const entry=Object.keys(addon).find(n=>n==='SleepyMumla_'+(pack.type==='behavior'?'BP':'RP')+'.mcpack'&&n.endsWith('.mcpack'));if(!entry)fail('artifact_integrity');const files=unzipSync(addon[entry]);const manifest=JSON.parse(Buffer.from(files['manifest.json']).toString());if(manifest.header.uuid!==pack.uuid||JSON.stringify(manifest.header.version)!==JSON.stringify(VERSION))fail('artifact_integrity');if(Object.keys(files).some(n=>n.startsWith('/')||n.includes('\\')||n.split('/').some(p=>p==='..'||p==='.'||!p)))fail('artifact_integrity');packs[pack.type]=files;}
  return {wheel:bytes[0],packs};
@@ -149,6 +176,13 @@ export async function installOnMCSV(client,body,loadArtifacts,authorize=async()=
  if(body.start===true&&!plan.canStart)fail('permission');
  if(plan.installation.status==='current'&&body.reinstall!==true)fail('reinstall_confirmation');
  if(active.has(plan.server.id))fail('busy');
+ // Block (before taking payment) any server with an unlicensed history, unless the owner installs:
+ // the owner install clears the marker and proceeds; everyone else is refused and the marker is
+ // (re)written so a stripped plugin cannot wipe its own trail.
+ if(plan.unlicensedHistory){
+  if(options.isOwner===true)await deleteMarker(client,plan.server.identifier);
+  else{await writeMarker(client,plan.server.identifier,'reinstall_blocked');fail('unlicensed_history');}
+ }
  if((await authorize(publicPlan(plan)))!==true)fail('payment_required');active.add(plan.server.id);
  let stage='download',mutated=false;
  // Vercel stops the function at 300s without running catch/finally; stop cleanly first so the
