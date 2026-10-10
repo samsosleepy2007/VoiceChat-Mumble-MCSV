@@ -5,10 +5,10 @@ import { signLicense, licenseEnabled, verifyLicense, LICENSE_USERS, issuedToday 
 import { BUNDLED as ENDWEAVE_BUNDLED, endweaveVersion, publicEndweave } from './endweave.js';
 import { signArtifact } from './artifact-token.js';
 
-export const WHEEL='endstone_mumble_host-0.6.3-cp312-cp312-manylinux_2_28_x86_64.whl';
+export const WHEEL='endstone_mumble_host-0.6.4-cp312-cp312-manylinux_2_28_x86_64.whl';
 export const PACKS=[{type:'behavior',uuid:'b6411120-cc4e-44a9-b28d-f43b10cafd86',folder:'SleepyMumla_BP'},{type:'resource',uuid:'cb345edb-6e6c-49ac-9950-e2ae07bda214',folder:'SleepyMumla_RP'}];
-const VERSION=[2,15,45];
-const PLUGIN_VERSION=[0,6,3];
+const VERSION=[2,15,46];
+const PLUGIN_VERSION=[0,6,4];
 function compareVersion(a,b){if(!Array.isArray(a)||a.length!==3||a.some(n=>!Number.isSafeInteger(n)||n<0))fail('existing_version');for(let i=0;i<3;i++)if(a[i]!==b[i])return a[i]>b[i]?1:-1;return 0;}
 const REQUIRED=['server_overview','files_list','files_read','files_read_many','files_read_base64','files_fetch_url','files_decompress','files_write','files_edit','files_compress','domain_info','power_action'];
 const validName=name=>typeof name==='string'&&name.length>0&&name!=='.'&&name!=='..'&&!/[\\/\x00-\x1f]/.test(name);
@@ -112,7 +112,7 @@ export async function prepareInstallation(client,{endweave=ENDWEAVE_BUNDLED}={})
 }
 export function publicPlan(plan){const {internal,...publicData}=plan;return publicData;}
 export async function fetchArtifacts(request,release){
- const definitions=[{name:'plugin/'+WHEEL,hash:'0839b0acb58d207aad957ff3617b891479028c7828e6731158e2e94195e603d5'},{name:'addon/VC_Mumble_ItemMic_v2.15.45_protected.mcaddon',hash:'22835c1b1189b3b3abb0e6a8b8e0c52ab90de6eb791bb0e07ae0ea01bdb30e35'}];
+ const definitions=[{name:'plugin/'+WHEEL,hash:'f69e425d64d1fca2e86dd231f32cd195673344d80d13433e65517b96d34ab0cb'},{name:'addon/VC_Mumble_ItemMic_v2.15.46_protected.mcaddon',hash:'36fbbc60aefdbfb5e40667da0dbc898a3fb580f914848f8f79ec2f9ecac0da8b'}];
  const bytes=[];for(const item of definitions){let response;try{response=await request(release+item.name,{signal:AbortSignal.timeout(30000)});}catch{fail('artifact_unavailable');}if(!response.ok)fail('artifact_unavailable');const buffer=Buffer.from(await response.arrayBuffer());if(buffer.length>4000000||createHash('sha256').update(buffer).digest('hex')!==item.hash)fail('artifact_integrity');bytes.push(buffer);}
  const addon=unzipSync(bytes[1]);const packs={};for(const pack of PACKS){const entry=Object.keys(addon).find(n=>n==='SleepyMumla_'+(pack.type==='behavior'?'BP':'RP')+'.mcpack'&&n.endsWith('.mcpack'));if(!entry)fail('artifact_integrity');const files=unzipSync(addon[entry]);const manifest=JSON.parse(Buffer.from(files['manifest.json']).toString());if(manifest.header.uuid!==pack.uuid||JSON.stringify(manifest.header.version)!==JSON.stringify(VERSION))fail('artifact_integrity');if(Object.keys(files).some(n=>n.startsWith('/')||n.includes('\\')||n.split('/').some(p=>p==='..'||p==='.'||!p)))fail('artifact_integrity');packs[pack.type]=files;}
  return {wheel:bytes[0],packs};

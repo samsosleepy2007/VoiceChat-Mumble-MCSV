@@ -17,7 +17,7 @@ function assertLicense(text,{server='5fb3cecf',port,users=99}){
 }
 const { BUNDLED, pickRelease, latestEndweave, loadEndweave, endweaveBytes, resetEndweaveCache } = await import('../web/join/lib/endweave.js');
 const weaveBytes=Buffer.from('test-endweave');const weaveInfo={...BUNDLED,sha256:createHash('sha256').update(weaveBytes).digest('hex'),size:weaveBytes.length,source:'test'};
-const fixture={endweave:{info:weaveInfo,bytes:weaveBytes},wheel:Buffer.from('test-wheel'),packs:Object.fromEntries(PACKS.map(p=>[p.type,{'manifest.json':Buffer.from(JSON.stringify({header:{uuid:p.uuid,version:[2,15,45]}})),'test.txt':Buffer.from('test')}]))};
+const fixture={endweave:{info:weaveInfo,bytes:weaveBytes},wheel:Buffer.from('test-wheel'),packs:Object.fromEntries(PACKS.map(p=>[p.type,{'manifest.json':Buffer.from(JSON.stringify({header:{uuid:p.uuid,version:[2,15,46]}})),'test.txt':Buffer.from('test')}]))};
 const required=['server_overview','files_list','files_read','files_read_many','files_read_base64','files_upload_base64','files_fetch_url','files_decompress','files_write','files_edit','files_compress','files_delete','power_action','domain_info'];
 function server({state='offline',permission=true,world='Bedrock level'}={}){
  const files=new Map([['/server.properties','level-name='+world+'\nserver-port=10459\n'],['/worlds/'+world+'/world_behavior_packs.json','[{"pack_id":"other-bp","version":[1,0,0],"extra":true}]'],['/worlds/'+world+'/world_resource_packs.json','[]'],['/plugins/mumble_host/config.toml','# keep this\n[mumble]\nport = 18655 # voice\nusers = 17\n[voice]\nmax_range = 150\n']]);

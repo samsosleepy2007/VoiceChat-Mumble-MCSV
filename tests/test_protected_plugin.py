@@ -13,12 +13,12 @@ import typing
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-for name in ['endstone', 'endstone.command', 'endstone.form', 'endstone.plugin', 'endstone.event']:
+for name in ['endstone', 'endstone.command', 'endstone.form', 'endstone.plugin', 'endstone.event', 'endstone.scoreboard']:
     sys.modules[name] = types.ModuleType(name)
 for module, names in {
     'endstone': ['Player'], 'endstone.command': ['Command', 'CommandSender'],
     'endstone.form': ['ActionForm'], 'endstone.plugin': ['Plugin'],
-    'endstone.event': ['PlayerJoinEvent', 'PlayerQuitEvent'],
+    'endstone.event': ['PlayerJoinEvent', 'PlayerQuitEvent'], 'endstone.scoreboard': ['Criteria'],
 }.items():
     for name in names:
         setattr(sys.modules[module], name, type(name, (), {}))
